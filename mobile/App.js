@@ -19,47 +19,59 @@ const getFormattedTime = () => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 };
 
+// Realistic Billiard Ball Themes matching standard tournament pool balls (Image 2)
+const BALL_THEMES = {
+  1:  { solid: '#F6C400', gradient: ['#FFEA75', '#F6C400', '#B58B00'], stripe: false },
+  2:  { solid: '#0047BB', gradient: ['#4E82F4', '#0047BB', '#002574'], stripe: false },
+  3:  { solid: '#D92525', gradient: ['#FF6666', '#D92525', '#800C0C'], stripe: false },
+  4:  { solid: '#532785', gradient: ['#925CD9', '#532785', '#2C0D4F'], stripe: false },
+  5:  { solid: '#E95B0C', gradient: ['#FF924D', '#E95B0C', '#993400'], stripe: false },
+  6:  { solid: '#0D6B38', gradient: ['#2EB868', '#0D6B38', '#033B1C'], stripe: false, underline: true },
+  7:  { solid: '#632A19', gradient: ['#A34E35', '#632A19', '#381206'], stripe: false },
+  8:  { solid: '#161616', gradient: ['#484848', '#1A1A1A', '#050505'], stripe: false },
+  9:  { solid: '#F6C400', gradient: ['#FFEA75', '#F6C400', '#B58B00'], stripe: true,  underline: true },
+  10: { solid: '#0047BB', gradient: ['#4E82F4', '#0047BB', '#002574'], stripe: true },
+  11: { solid: '#D92525', gradient: ['#FF6666', '#D92525', '#800C0C'], stripe: true },
+  12: { solid: '#532785', gradient: ['#925CD9', '#532785', '#2C0D4F'], stripe: true },
+  13: { solid: '#E95B0C', gradient: ['#FF924D', '#E95B0C', '#993400'], stripe: true },
+  14: { solid: '#0D6B38', gradient: ['#2EB868', '#0D6B38', '#033B1C'], stripe: true },
+  15: { solid: '#632A19', gradient: ['#A34E35', '#632A19', '#381206'], stripe: true },
+};
+
 const getBallColor = (num) => {
-  const colors = {
-    3: '#E53935',  // Red
-    4: '#5E35B1',  // Purple
-    5: '#FB8C00',  // Orange
-    6: '#43A047',  // Green
-    7: '#8D6E63',  // Brown
-    8: '#212121',  // Black
-    9: '#FDD835',  // Yellow
-    10: '#1E88E5', // Blue
-    11: '#E53935', // Red stripe
-    12: '#5E35B1', // Purple stripe
-    13: '#FB8C00', // Orange stripe
-    14: '#43A047', // Green stripe
-    15: '#8D6E63', // Brown stripe
-  };
-  return colors[num] || '#888888';
+  return BALL_THEMES[num]?.solid || '#888888';
 };
 
 const MiniatureBall = ({ item }) => {
   const isScore = item.startsWith('+');
   const num = parseInt(item.slice(1), 10);
-  const color = isScore ? getBallColor(num) : '#666666';
-  const stripe = isScore && num >= 9 && num <= 15;
-
-  if (stripe) {
-    return (
-      <View style={[styles.miniBall, { backgroundColor: '#fff', borderWidth: 0.5, borderColor: '#ccc' }]}>
-        <View style={[styles.miniBallStripe, { backgroundColor: color }]} />
-        <View style={styles.miniBallInner}>
-          <Text style={styles.miniBallText}>{num}</Text>
-        </View>
-      </View>
-    );
-  }
+  const theme = BALL_THEMES[num] || { solid: '#666', gradient: ['#888', '#666', '#444'], stripe: false };
+  const isStripe = isScore && theme.stripe;
 
   return (
-    <View style={[styles.miniBall, { backgroundColor: color }]}>
-      <View style={styles.miniBallInner}>
-        <Text style={styles.miniBallText}>{num}</Text>
-      </View>
+    <View style={styles.miniBall}>
+      {isStripe ? (
+        <LinearGradient
+          colors={['#ffffff', '#ececec', '#c8c8c8']}
+          style={styles.miniBallBase}
+        >
+          <View style={[styles.miniBallStripe, { backgroundColor: theme.solid }]} />
+          <View style={styles.miniBallInner}>
+            <Text style={styles.miniBallText}>{num}</Text>
+            {theme.underline && <View style={styles.miniBallUnderline} />}
+          </View>
+        </LinearGradient>
+      ) : (
+        <LinearGradient
+          colors={isScore ? theme.gradient : ['#666666', '#444444', '#222222']}
+          style={styles.miniBallBase}
+        >
+          <View style={styles.miniBallInner}>
+            <Text style={styles.miniBallText}>{num}</Text>
+            {theme.underline && <View style={styles.miniBallUnderline} />}
+          </View>
+        </LinearGradient>
+      )}
     </View>
   );
 };
@@ -1529,29 +1541,28 @@ const renderStore = () => {
                   <View key={i} style={[styles.pocketDot, pos]} />
                 ))}
 
-                {/* Balls — spread evenly so no overlap, arc/scattered layout */}
+                {/* Balls - perfectly dispersed across table with zero overlap (Image 2 style) */}
                 {[
-                  { num: 3,  top: '12%', left: '18%' },
-                  { num: 4,  top: '32%', left: '10%' },
-                  { num: 5,  top: '55%', left: '15%' },
-                  { num: 6,  top: '75%', left: '28%' },
-                  { num: 7,  top: '85%', left: '48%' },
-                  { num: 8,  top: '48%', left: '47%' },
-                  { num: 9,  top: '20%', left: '48%' },
-                  { num: 10, top: '8%',  left: '65%' },
-                  { num: 11, top: '28%', left: '76%' },
-                  { num: 12, top: '50%', left: '82%' },
-                  { num: 13, top: '70%', left: '72%' },
-                  { num: 14, top: '83%', left: '58%' },
-                  { num: 15, top: '12%', left: '34%' },
+                  { num: 3,  top: '15%', left: '16%' },
+                  { num: 4,  top: '38%', left: '14%' },
+                  { num: 5,  top: '62%', left: '15%' },
+                  { num: 6,  top: '83%', left: '24%' },
+                  { num: 7,  top: '84%', left: '44%' },
+                  { num: 8,  top: '50%', left: '48%' },
+                  { num: 9,  top: '26%', left: '50%' },
+                  { num: 10, top: '14%', left: '68%' },
+                  { num: 11, top: '34%', left: '84%' },
+                  { num: 12, top: '58%', left: '85%' },
+                  { num: 13, top: '82%', left: '78%' },
+                  { num: 14, top: '72%', left: '62%' },
+                  { num: 15, top: '14%', left: '34%' },
                 ].map(({ num, top, left }) => {
                   const remaining = status.remaining_numbers;
                   const isPocketed = !remaining.includes(num);
                   if (isPocketed) return null;
                   const isSelected = selectedBall === num;
-                  const ballColor = getBallColor(num);
-                  const isStripe = num >= 9 && num <= 15;
-                  const isBall8 = num === 8;
+                  const theme = BALL_THEMES[num] || { solid: '#888', gradient: ['#aaa', '#888', '#555'], stripe: false };
+                  const isStripe = theme.stripe;
                   return (
                     <TouchableOpacity
                       key={num}
@@ -1564,32 +1575,61 @@ const renderStore = () => {
                         setSelectedBall(num);
                         playSound('ball_select');
                       }}
-                      activeOpacity={0.75}
+                      activeOpacity={0.8}
                     >
                       {/* Glow ring behind the ball when selected */}
                       {isSelected && <View style={styles.tableBallGlow} />}
 
-                      {isStripe ? (
-                        /* STRIPE ball: white base, colour band in the middle */
-                        <View style={[styles.tableBall, styles.tableBallSolid, { backgroundColor: '#fff', borderColor: 'rgba(255,255,255,0.35)' }]}>
-                          {/* Coloured stripe band */}
-                          <View style={[styles.tableBallStripeBand, { backgroundColor: ballColor }]} />
-                          {/* White dot with number */}
-                          <View style={[styles.tableBallDot, { zIndex: 3 }]}>
-                            <Text style={styles.tableBallNumText}>{num}</Text>
-                          </View>
-                        </View>
-                      ) : (
-                        /* SOLID ball: solid colour, white dot with number */
-                        <View style={[styles.tableBall, styles.tableBallSolid, { backgroundColor: ballColor, borderColor: 'rgba(255,255,255,0.25)' }]}>
-                          {/* Subtle highlight glare */}
-                          <View style={styles.tableBallGlare} />
-                          {/* White dot with number */}
-                          <View style={styles.tableBallDot}>
-                            <Text style={[styles.tableBallNumText, isBall8 && { color: '#fff' }]}>{num}</Text>
-                          </View>
-                        </View>
-                      )}
+                      {/* Directional contact shadow on green cloth */}
+                      <View style={styles.tableBallShadow} />
+
+                      {/* 3D Realistic Billiard Ball matching Image 2 */}
+                      <View style={styles.tableBall}>
+                        {isStripe ? (
+                          /* STRIPED BALL (9 to 15): White base with wide 3D colored stripe */
+                          <LinearGradient
+                            colors={['#ffffff', '#f4f4f4', '#c9c9c9']}
+                            start={{ x: 0.22, y: 0.12 }}
+                            end={{ x: 0.85, y: 0.92 }}
+                            style={styles.ballSphereBase}
+                          >
+                            {/* Wide Middle Colored Stripe Band */}
+                            <LinearGradient
+                              colors={theme.gradient}
+                              start={{ x: 0.22, y: 0.15 }}
+                              end={{ x: 0.85, y: 0.90 }}
+                              style={styles.tableBallStripeBand}
+                            />
+                            {/* Specular gloss reflections */}
+                            <View style={styles.tableBallGlare} />
+                            <View style={styles.tableBallPinpoint} />
+                            {/* Center White Number Circle */}
+                            <View style={styles.tableBallDot}>
+                              <Text style={styles.tableBallNumText}>{num}</Text>
+                              {theme.underline && <View style={styles.ballNumUnderline} />}
+                            </View>
+                          </LinearGradient>
+                        ) : (
+                          /* SOLID BALL (1 to 8): 3D Sphere with Center White Number Circle */
+                          <LinearGradient
+                            colors={theme.gradient}
+                            start={{ x: 0.22, y: 0.12 }}
+                            end={{ x: 0.85, y: 0.92 }}
+                            style={styles.ballSphereBase}
+                          >
+                            {/* Specular gloss reflections */}
+                            <View style={styles.tableBallGlare} />
+                            <View style={styles.tableBallPinpoint} />
+                            {/* Subtle bottom rim reflection */}
+                            <View style={styles.tableBallRim} />
+                            {/* Center White Number Circle */}
+                            <View style={styles.tableBallDot}>
+                              <Text style={styles.tableBallNumText}>{num}</Text>
+                              {theme.underline && <View style={styles.ballNumUnderline} />}
+                            </View>
+                          </LinearGradient>
+                        )}
+                      </View>
                     </TouchableOpacity>
                   );
                 })}
@@ -1952,37 +1992,57 @@ const styles = StyleSheet.create({
   playerName: { color: '#aab', fontSize: 15, fontWeight: 'bold' },
   playerScore: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginTop: 5 },
   miniBall: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
-    margin: 2,
-    elevation: 2,
+    margin: 2.5,
+    overflow: 'hidden',
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 1,
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.4,
+    shadowRadius: 1.5,
+  },
+  miniBallBase: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
   },
   miniBallStripe: {
     position: 'absolute',
     width: '100%',
-    height: 8,
+    height: 13,
+    top: 4.5,
     zIndex: 1,
   },
   miniBallInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#fff',
+    width: 10.5,
+    height: 10.5,
+    borderRadius: 5.25,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
+    borderWidth: 0.4,
+    borderColor: 'rgba(0,0,0,0.15)',
   },
   miniBallText: {
-    color: '#000',
+    color: '#0d0d0d',
     fontSize: 6.5,
-    fontWeight: 'bold',
+    fontWeight: '900',
+    lineHeight: 8,
+  },
+  miniBallUnderline: {
+    width: 5,
+    height: 0.8,
+    backgroundColor: '#0d0d0d',
+    borderRadius: 0.5,
+    marginTop: 0.3,
   },
   miniBallsRow: {
     flexDirection: 'row',
@@ -2018,79 +2078,129 @@ const styles = StyleSheet.create({
   // Each ball's absolute-positioned touch target
   tableBallTouch: {
     position: 'absolute',
-    width: 44,
-    height: 44,
-    marginLeft: -22,
-    marginTop: -22,
+    width: 48,
+    height: 48,
+    marginLeft: -24,
+    marginTop: -24,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 5,
   },
+  // Realistic contact drop shadow on green table felt
+  tableBallShadow: {
+    position: 'absolute',
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#000',
+    opacity: 0.38,
+    top: 5,
+    left: 4,
+    transform: [{ scaleY: 0.65 }],
+    zIndex: 1,
+  },
   // The round ball itself
   tableBall: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     overflow: 'hidden',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  tableBallSolid: {
+    zIndex: 2,
     elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.6,
-    shadowRadius: 4,
-    borderWidth: 2,
   },
-  // Stripe band across the middle of a stripe ball
+  ballSphereBase: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 21,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  // Wide stripe band across middle of stripe balls (Image 2 style)
   tableBallStripeBand: {
     position: 'absolute',
     width: '100%',
-    height: 15,
-    top: '50%',
-    marginTop: -7.5,
+    height: 25,
+    top: 8.5,
     zIndex: 1,
   },
-  // Small white circle that holds the number
+  // Crisp white circle that holds the number (clean white on every ball like Image 2!)
   tableBallDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#fff',
+    width: 19,
+    height: 19,
+    borderRadius: 9.5,
+    backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 2,
+    zIndex: 3,
+    borderWidth: 0.6,
+    borderColor: 'rgba(0,0,0,0.22)',
     elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.25,
+    shadowRadius: 1,
   },
   tableBallNumText: {
-    color: '#111',
-    fontSize: 9,
+    color: '#0d0d0d',
+    fontSize: 9.5,
     fontWeight: '900',
     includeFontPadding: false,
+    textAlign: 'center',
     textAlignVertical: 'center',
     lineHeight: 11,
   },
-  // Small top-left glare to give 3D sphere effect
+  ballNumUnderline: {
+    width: 8.5,
+    height: 1.3,
+    backgroundColor: '#0d0d0d',
+    borderRadius: 1,
+    marginTop: 0.5,
+  },
+  // Curved gloss specular glare on top-left (Image 2 polished finish)
   tableBallGlare: {
     position: 'absolute',
-    width: 12,
+    width: 14,
     height: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.45)',
-    top: 5,
-    left: 6,
-    zIndex: 3,
-    transform: [{ rotate: '-30deg' }],
+    borderRadius: 7,
+    backgroundColor: 'rgba(255,255,255,0.65)',
+    top: 3.5,
+    left: 5.5,
+    zIndex: 4,
+    transform: [{ rotate: '-35deg' }],
+  },
+  // Tiny sharp pinpoint reflection for glossy 3D shine
+  tableBallPinpoint: {
+    position: 'absolute',
+    width: 3.5,
+    height: 3.5,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    top: 5.5,
+    left: 8.5,
+    zIndex: 5,
+  },
+  tableBallRim: {
+    position: 'absolute',
+    width: 12,
+    height: 5,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    bottom: 2.5,
+    right: 5,
+    zIndex: 2,
+    transform: [{ rotate: '-25deg' }],
   },
   tableBallGlow: {
     position: 'absolute',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    borderWidth: 2.5,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 3,
     borderColor: '#ffcc00',
-    backgroundColor: 'rgba(255, 204, 0, 0.20)',
+    backgroundColor: 'rgba(255, 204, 0, 0.25)',
     zIndex: 0,
   },
   tableBallHint: {
