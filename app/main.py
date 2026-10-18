@@ -4,15 +4,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
-
 from app.controllers.game_controller import router
-
 app = FastAPI(
     title="Score Game API",
     description="A turn-based scoring game API for 2-4 players",
     version="1.0.0"
 )
-
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -21,10 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # API routes
 app.include_router(router, prefix="/api", tags=["game"])
-
 # Static files - make sure the directory exists
 static_dir = "app/views/static"
 if os.path.exists(static_dir):
@@ -35,7 +30,6 @@ if os.path.exists(static_dir):
     )
 else:
     print(f"Warning: Static directory '{static_dir}' does not exist")
-
 # Root route
 @app.get("/")
 def read_index():

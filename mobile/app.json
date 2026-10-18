@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Kotariw Score",
+    "name": "Kotariw",
     "slug": "kotariw-score",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -9,8 +9,8 @@
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0a3d2f"
+      "resizeMode": "cover",
+      "backgroundColor": "#1a0533"
     },
     "ios": {
       "supportsTablet": true,
@@ -31,6 +31,9 @@
       "eas": {
         "projectId": "56a7bdef-b204-4df9-8956-b290f9217872"
       }
-    }
+    },
+    "plugins": [
+      "expo-web-browser"
+    ]
   }
 }

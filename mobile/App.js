@@ -1,10 +1,143 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ImageBackground } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ImageBackground, Modal, StatusBar, KeyboardAvoidingView, Platform, Vibration, ActivityIndicator } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GameEngine } from './game';
+import { translations } from './i18n';
+import { loadSounds, unloadSounds, playSound, setSoundEnabled, playBackgroundMusic, stopBackgroundMusic } from './sounds';
+import * as WebBrowser from 'expo-web-browser';
+import { initializeChapaPayment, verifyChapaPayment, getChapaSecretKey, getChapaPublicKey, saveChapaKeys } from './payment';
+
+const getTodayDateString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getFormattedTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+const getBallColor = (num) => {
+  const colors = {
+    3: '#E53935',  // Red
+    4: '#5E35B1',  // Purple
+    5: '#FB8C00',  // Orange
+    6: '#43A047',  // Green
+    7: '#8D6E63',  // Brown
+    8: '#212121',  // Black
+    9: '#FDD835',  // Yellow
+    10: '#1E88E5', // Blue
+    11: '#E53935', // Red stripe
+    12: '#5E35B1', // Purple stripe
+    13: '#FB8C00', // Orange stripe
+    14: '#43A047', // Green stripe
+    15: '#8D6E63', // Brown stripe
+  };
+  return colors[num] || '#888888';
+};
+
+const MiniatureBall = ({ item }) => {
+  const isScore = item.startsWith('+');
+  const num = parseInt(item.slice(1), 10);
+  const color = isScore ? getBallColor(num) : '#666666';
+  const stripe = isScore && num >= 9 && num <= 15;
+
+  if (stripe) {
+    return (
+      <View style={[styles.miniBall, { backgroundColor: '#fff', borderWidth: 0.5, borderColor: '#ccc' }]}>
+        <View style={[styles.miniBallStripe, { backgroundColor: color }]} />
+        <View style={styles.miniBallInner}>
+          <Text style={styles.miniBallText}>{num}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.miniBall, { backgroundColor: color }]}>
+      <View style={styles.miniBallInner}>
+        <Text style={styles.miniBallText}>{num}</Text>
+      </View>
+    </View>
+  );
+};
+
+const triggerHaptic = (type = 'light') => {
+  try {
+    if (type === 'light') {
+      Vibration.vibrate(12);
+    } else if (type === 'medium') {
+      Vibration.vibrate(35);
+    } else if (type === 'heavy') {
+      Vibration.vibrate(75);
+    } else if (type === 'double') {
+      Vibration.vibrate([0, 40, 60, 40]);
+    }
+  } catch (e) {
+    console.warn('Haptic feedback error:', e);
+  }
+};
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('HOME'); // 'HOME' | 'SETUP' | 'GAME'
+  const [currentScreen, setCurrentScreen] = useState('HOME');
+  const [setupVisible, setSetupVisible] = useState(false);
+
+  // Language & Sound
+  const [lang, setLang] = useState('en');
+  const [soundOn, setSoundOn] = useState(true);
+  const t = translations[lang];
+  const toggleLang = () => {
+    triggerHaptic('light');
+    setLang(l => l === 'en' ? 'am' : 'en');
+  };
+  const toggleSound = () => {
+    triggerHaptic('medium');
+    const next = !soundOn;
+    setSoundOn(next);
+    setSoundEnabled(next);
+  };
+
+  // Economy State
+  const [coins, setCoins] = useState(null);
+  const [storeVisible, setStoreVisible] = useState(false);
+
+  // Payment States
+  const [paymentStep, setPaymentStep] = useState('packages'); // packages, method, manual, processing, settings
+  const [selectedPackage, setSelectedPackage] = useState(null);
+  const [verifyingTx, setVerifyingTx] = useState(false);
+  const [currentTxRef, setCurrentTxRef] = useState('');
+  const [pubKeyInput, setPubKeyInput] = useState('');
+  const [secKeyInput, setSecKeyInput] = useState('');
+
+  useEffect(() => {
+    if (storeVisible) {
+      const loadKeys = async () => {
+        const pub = await getChapaPublicKey();
+        const sec = await getChapaSecretKey();
+        setPubKeyInput(pub);
+        setSecKeyInput(sec);
+      };
+      loadKeys();
+    } else {
+      setPaymentStep('packages');
+      setSelectedPackage(null);
+      setVerifyingTx(false);
+    }
+  }, [storeVisible]);
+
+  // Session State
+  const [operator, setOperator] = useState('Operator 1');
+  const [tableNumber, setTableNumber] = useState('1');
+  const [sessionGamesCount, setSessionGamesCount] = useState(0);
+  const [sessionTotalPot, setSessionTotalPot] = useState(0);
   
+  // Players database state (frequent players)
+  const [savedPlayers, setSavedPlayers] = useState([]);
+  const [playerPickerVisible, setPlayerPickerVisible] = useState(false);
+  const [activePlayerIndex, setActivePlayerIndex] = useState(null);
+
   // Setup State
   const [playerCount, setPlayerCount] = useState(2);
   const [playersData, setPlayersData] = useState([
@@ -17,6 +150,228 @@ export default function App() {
   const [status, setStatus] = useState(null);
   const [selectedBall, setSelectedBall] = useState(null);
   const [winner, setWinner] = useState(null);
+  const [gameStartTime, setGameStartTime] = useState(null);
+
+  // Game History State
+  const [gameHistory, setGameHistory] = useState([]);
+
+  // History Tab State (must be at component level — not inside renderHistory)
+  const [historyTab, setHistoryTab] = useState('matches');
+
+  // Pricing rules states (percentages)
+  const [pctWinner, setPctWinner] = useState(80);
+  const [pctTable, setPctTable] = useState(0);
+  const [pctKotariw, setPctKotariw] = useState(20);
+
+  // Dashboard Form inputs
+  const [winnerInput, setWinnerInput] = useState('80');
+  const [tableInput, setTableInput] = useState('0');
+  const [kotariwInput, setKotariwInput] = useState('20');
+
+  // Menu and Dashboard visibility states
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [dashboardVisible, setDashboardVisible] = useState(false);
+
+  // Operator Profiles
+  const [operatorProfiles, setOperatorProfiles] = useState([]);
+  const [activeOperatorId, setActiveOperatorId] = useState(null);
+  const [operatorModalVisible, setOperatorModalVisible] = useState(false);
+  const [newOperatorName, setNewOperatorName] = useState('');
+  const [editingOperatorId, setEditingOperatorId] = useState(null);
+  const [shiftData, setShiftData] = useState(null); // { operatorId, startTime, startDate, games, earnings }
+
+  useEffect(() => {
+    const initSounds = async () => {
+      await loadSounds();
+      playBackgroundMusic();
+    };
+    initSounds();
+    return () => { unloadSounds(); };
+  }, []);
+
+  useEffect(() => {
+    const initializeAppData = async () => {
+       try {
+         // Load Coins
+         const storedCoins = await AsyncStorage.getItem('kotariw_coins');
+         if (storedCoins === null) {
+             await AsyncStorage.setItem('kotariw_coins', '10'); // 10 Free initially
+             setCoins(10);
+         } else {
+             setCoins(parseInt(storedCoins));
+         }
+
+         // Load Saved Players
+         const storedPlayers = await AsyncStorage.getItem('kotariw_players');
+         if (storedPlayers !== null) {
+             setSavedPlayers(JSON.parse(storedPlayers));
+         }
+
+         // Load Game History
+         const storedHistory = await AsyncStorage.getItem('kotariw_history');
+         if (storedHistory !== null) {
+             setGameHistory(JSON.parse(storedHistory));
+         }
+
+         // Load Operator Profiles
+         const storedProfiles = await AsyncStorage.getItem('kotariw_operators');
+         if (storedProfiles !== null) {
+           const profiles = JSON.parse(storedProfiles);
+           setOperatorProfiles(profiles);
+         }
+         const storedActiveOp = await AsyncStorage.getItem('kotariw_active_operator_id');
+         if (storedActiveOp !== null) setActiveOperatorId(storedActiveOp);
+         const storedShift = await AsyncStorage.getItem('kotariw_shift');
+         if (storedShift !== null) setShiftData(JSON.parse(storedShift));
+
+         // Load / Initialize Session
+         const today = getTodayDateString();
+         const storedSession = await AsyncStorage.getItem('kotariw_session');
+         if (storedSession !== null) {
+             const sessionData = JSON.parse(storedSession);
+             if (sessionData.date === today) {
+                 setSessionGamesCount(sessionData.gamesCount || 0);
+                 setSessionTotalPot(sessionData.totalPot || 0);
+                 setOperator(sessionData.operator || 'Operator 1');
+                 setTableNumber(sessionData.tableNumber || '1');
+             } else {
+                 // Reset at midnight
+                 const newSession = { date: today, gamesCount: 0, totalPot: 0, operator: 'Operator 1', tableNumber: '1' };
+                 await AsyncStorage.setItem('kotariw_session', JSON.stringify(newSession));
+                 setSessionGamesCount(0);
+                 setSessionTotalPot(0);
+             }
+         } else {
+             const newSession = { date: today, gamesCount: 0, totalPot: 0, operator: 'Operator 1', tableNumber: '1' };
+             await AsyncStorage.setItem('kotariw_session', JSON.stringify(newSession));
+         }
+
+       } catch (e) { console.error(e); }
+    };
+    // Load Pricing Settings
+    const loadPricingSettings = async () => {
+      try {
+        const storedPctWinner = await AsyncStorage.getItem('kotariw_pct_winner');
+        const storedPctTable = await AsyncStorage.getItem('kotariw_pct_table');
+        const storedPctKotariw = await AsyncStorage.getItem('kotariw_pct_kotariw');
+
+        if (storedPctWinner !== null) {
+          setPctWinner(Number(storedPctWinner));
+          setWinnerInput(storedPctWinner);
+        }
+        if (storedPctTable !== null) {
+          setPctTable(Number(storedPctTable));
+          setTableInput(storedPctTable);
+        }
+        if (storedPctKotariw !== null) {
+          setPctKotariw(Number(storedPctKotariw));
+          setKotariwInput(storedPctKotariw);
+        }
+      } catch (err) {
+        console.error('Failed to load pricing:', err);
+      }
+    };
+
+    loadPricingSettings().then(() => {
+      initializeAppData();
+    });
+  }, []);
+
+  const saveSessionState = async (newGamesCount, newTotalPot, currentOp = operator, currentTable = tableNumber) => {
+    try {
+      const today = getTodayDateString();
+      const sessionData = {
+        date: today,
+        gamesCount: newGamesCount,
+        totalPot: newTotalPot,
+        operator: currentOp,
+        tableNumber: currentTable
+      };
+      await AsyncStorage.setItem('kotariw_session', JSON.stringify(sessionData));
+    } catch (e) {
+      console.error("Error saving session state", e);
+    }
+  };
+
+  const deductGameCoin = async () => {
+    if (coins <= 0) {
+       Alert.alert("Out of Coins!", "Please buy more coins to start a new game.");
+       setSetupVisible(false);
+       setStoreVisible(true);
+       return false;
+    }
+    const newVal = coins - 1;
+    await AsyncStorage.setItem('kotariw_coins', newVal.toString());
+    setCoins(newVal);
+    return true;
+  };
+
+  const startChapaPayment = async () => {
+    if (!selectedPackage) return;
+    setPaymentStep('processing');
+    setVerifyingTx(true);
+    const ref = 'kotariw-tx-' + Date.now();
+    setCurrentTxRef(ref);
+    try {
+      const res = await initializeChapaPayment(
+        selectedPackage.price,
+        ref,
+        'operator@kotariw.com',
+        operator || 'Operator'
+      );
+      if (res.success && res.checkoutUrl) {
+        await WebBrowser.openBrowserAsync(res.checkoutUrl);
+        await verifyChapaTransaction(ref);
+      } else {
+        throw new Error('No checkout URL returned.');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert(t.paymentFailedTitle, e.message || t.paymentFailedMsg);
+      setPaymentStep('packages');
+      setVerifyingTx(false);
+    }
+  };
+
+  const verifyChapaTransaction = async (ref) => {
+    setPaymentStep('processing');
+    setVerifyingTx(true);
+    try {
+      const res = await verifyChapaPayment(ref);
+      if (res.success && res.data.status === 'success') {
+        const addedCoins = selectedPackage.amount;
+        const newVal = coins + addedCoins;
+        await AsyncStorage.setItem('kotariw_coins', newVal.toString());
+        setCoins(newVal);
+        Alert.alert(t.paymentSuccessTitle, t.paymentSuccessMsg(addedCoins));
+        setStoreVisible(false);
+      } else {
+        Alert.alert(t.paymentFailedTitle, t.paymentFailedMsg);
+        setPaymentStep('packages');
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert(t.paymentFailedTitle, t.paymentFailedMsg);
+      setPaymentStep('packages');
+    } finally {
+      setVerifyingTx(false);
+    }
+  };
+
+  const handleSaveChapaKeys = async () => {
+    const success = await saveChapaKeys(pubKeyInput, secKeyInput);
+    if (success) {
+      Alert.alert(t.settingsSaved, t.settingsSaved);
+      setPaymentStep('packages');
+    } else {
+      Alert.alert(t.error, 'Failed to save API keys.');
+    }
+  };
+
+  const handleConfirmManualTransfer = () => {
+    Alert.alert(t.manualSubmitTitle, t.manualSubmitMsg);
+    setStoreVisible(false);
+  };
 
   const handlePlayerCountChange = (count) => {
     setPlayerCount(count);
@@ -33,51 +388,173 @@ export default function App() {
     setPlayersData(newData);
   };
 
-  const startGame = () => {
-    // Validate inputs
+  const openPlayerPicker = (index) => {
+    setActivePlayerIndex(index);
+    setPlayerPickerVisible(true);
+  };
+
+  const selectFrequentPlayer = (playerName) => {
+    if (activePlayerIndex !== null) {
+      updatePlayerData(activePlayerIndex, 'name', playerName);
+    }
+    setPlayerPickerVisible(false);
+    setActivePlayerIndex(null);
+  };
+
+  const startGame = async () => {
+    triggerHaptic('medium');
     for (const p of playersData) {
-      if (!p.name || !p.name.trim()) return Alert.alert("Error", "All players must have a name!");
+      if (!p.name || !p.name.trim()) return Alert.alert(t.error, t.allNamesRequired);
       const betVal = Number(p.bet);
-      if (isNaN(betVal) || betVal < 50) return Alert.alert("Invalid Bet", `${p.name || 'A player'} must bet at least 50 Birr!`);
+      if (isNaN(betVal) || betVal < 50) return Alert.alert(t.invalidBet, t.minBet(p.name));
     }
     
-    // Duplicate Name check
     const names = playersData.map(p => p.name.trim().toLowerCase());
     if (new Set(names).size !== names.length) {
-      return Alert.alert("Error", "All players must have unique names!");
+      return Alert.alert(t.error, t.uniqueNames);
     }
 
-    const engine = new GameEngine(playersData);
+    if (!await deductGameCoin()) return;
+
+    // Save newly entered player names to frequent players list
+    try {
+      let updatedList = [...savedPlayers];
+      playersData.forEach(p => {
+        const trimmedName = p.name.trim();
+        if (!updatedList.includes(trimmedName)) {
+          updatedList.push(trimmedName);
+        }
+      });
+      setSavedPlayers(updatedList);
+      await AsyncStorage.setItem('kotariw_players', JSON.stringify(updatedList));
+    } catch (e) {
+      console.error(e);
+    }
+
+    // Save session config details to persist operator/table fields
+    await saveSessionState(sessionGamesCount, sessionTotalPot, operator, tableNumber);
+
+    const engine = new GameEngine(playersData, { pctWinner, pctTable, pctKotariw });
     setGameEngine(engine);
     setWinner(null);
     setStatus(engine.getStatus());
+    setGameStartTime(getFormattedTime());
+    setSetupVisible(false);
     setCurrentScreen('GAME');
   };
 
   const sendAction = (actionType) => {
     if (!gameEngine) return;
-    if (!selectedBall) return Alert.alert("Select a Ball", "Please select a pool ball first!");
-    
+    if (!selectedBall) return Alert.alert(t.selectBall, t.selectBallMsg);
     try {
       if (actionType === 'add') {
+         triggerHaptic('heavy');
          gameEngine.addScore(status.current_player, selectedBall);
+         playSound('score_add');
       } else {
+         triggerHaptic('double');
          gameEngine.subtractScore(status.current_player, selectedBall);
+         playSound('score_add');
       }
-      
       setStatus({ ...gameEngine.getStatus() });
       setSelectedBall(null);
-      
       const winnerData = gameEngine.checkWinner();
-      if (winnerData) {
-        setWinner(winnerData);
-      }
+      if (winnerData) { handleGameFinished(winnerData); }
     } catch (e) {
-      Alert.alert("Action Error", e.message);
+      Alert.alert(t.actionError, e.message);
     }
   };
 
+  const handleUndo = () => {
+    if (!gameEngine) return;
+    triggerHaptic('medium');
+    try {
+      const undone = gameEngine.undo();
+      if (undone) {
+        setStatus({ ...gameEngine.getStatus() });
+        setSelectedBall(null);
+      } else {
+        Alert.alert(t.undoError, t.undoErrorMsg);
+      }
+    } catch (e) {
+      Alert.alert(t.undoError, e.message);
+    }
+  };
+
+  const handleGameFinished = async (winnerData) => {
+    setWinner(winnerData);
+    playSound('winner');
+    
+    const endTime = getFormattedTime();
+    const today = getTodayDateString();
+    
+    const newEntry = {
+      id: Date.now().toString(),
+      date: today,
+      startTime: gameStartTime,
+      endTime: endTime,
+      table: tableNumber,
+      operator: operator,
+      totalPot: winnerData.total_pot,
+      winnerId: winnerData.winner_id,
+      winnerScore: winnerData.winner_score,
+      prizeWinner: winnerData.prize_winner,
+      prizeTable: winnerData.prize_table,
+      prizeKotariw: winnerData.prize_kotariw,
+      pctWinner,
+      pctTable,
+      pctKotariw,
+      players: playersData.map(p => {
+        return {
+          name: p.name.trim(),
+          bet: p.bet,
+          score: winnerData.all_scores[p.name.trim().toLowerCase()] || 0
+        };
+      })
+    };
+
+    // Update history, keeping only the last 100 games
+    let updatedHistory = [newEntry, ...gameHistory];
+    if (updatedHistory.length > 100) {
+      updatedHistory = updatedHistory.slice(0, 100);
+    }
+    setGameHistory(updatedHistory);
+    await AsyncStorage.setItem('kotariw_history', JSON.stringify(updatedHistory));
+
+    // Update daily session statistics
+    const newGamesCount = sessionGamesCount + 1;
+    const newTotalPot = sessionTotalPot + winnerData.total_pot;
+    setSessionGamesCount(newGamesCount);
+    setSessionTotalPot(newTotalPot);
+    await saveSessionState(newGamesCount, newTotalPot, operator, tableNumber);
+
+    // Update active shift data
+    if (shiftData && shiftData.operatorId === activeOperatorId) {
+      const updatedShift = {
+        ...shiftData,
+        games: (shiftData.games || 0) + 1,
+        earnings: (shiftData.earnings || 0) + winnerData.total_pot,
+        commission: ((shiftData.earnings || 0) + winnerData.total_pot) * (pctKotariw / 100),
+      };
+      setShiftData(updatedShift);
+      await AsyncStorage.setItem('kotariw_shift', JSON.stringify(updatedShift));
+    }
+  };
+
+  const handleQuitGame = () => {
+    triggerHaptic('medium');
+    Alert.alert(
+      t.quit,
+      t.confirmQuit,
+      [
+        { text: t.cancel, style: 'cancel' },
+        { text: t.quit, style: 'destructive', onPress: () => resetToHome() }
+      ]
+    );
+  };
+
   const resetToHome = () => {
+    triggerHaptic('medium');
     setGameEngine(null);
     setStatus(null);
     setWinner(null);
@@ -85,198 +562,1848 @@ export default function App() {
     setCurrentScreen('HOME');
   };
 
-  // UI Renderers
-  const renderHome = () => (
-    <ImageBackground source={require('./assets/splash_bg.png')} style={styles.homeBackground}>
-      <View style={styles.homeOverlay}>
-        <Text style={styles.titleLogo}>KOTARIW</Text>
-        <Text style={styles.subtitleLogo}>SCORE TRACKER</Text>
-        
-        <TouchableOpacity style={styles.playButton} onPress={() => setCurrentScreen('SETUP')}>
-          <Text style={styles.playButtonText}>START GAME</Text>
+  // ---------------- UI COMPONENTS ----------------
+
+  const renderGameHeader = () => (
+    <View style={styles.headerContainer}>
+      <View style={{flexDirection: 'row', alignItems: 'center'}}>
+        <TouchableOpacity style={styles.quitBtnHeader} onPress={handleQuitGame}>
+          <Ionicons name="exit" size={22} color="#ff4444" />
+        </TouchableOpacity>
+        <View style={styles.profileBadge}>
+          <Ionicons name="person-circle" size={40} color="#fff" />
+          <View style={styles.profileTextWrap}>
+            <Text style={styles.profileName}>Guest User</Text>
+            <View style={styles.levelWrap}>
+              <Text style={styles.levelText}>LVL 12</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+      <View style={styles.headerRightWrap}>
+        <TouchableOpacity style={styles.langBtn} onPress={toggleLang}>
+          <Text style={styles.langBtnText}>{t.language}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.langBtn} onPress={toggleSound}>
+          <Ionicons name={soundOn ? 'volume-high' : 'volume-mute'} size={18} color={soundOn ? '#00e676' : '#666'} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.historyBtn} onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}>
+          <Ionicons name="menu" size={24} color="#00e676" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.walletContainer} onPress={() => setStoreVisible(true)}>
+          <LinearGradient colors={['#ffd700', '#daa520']} style={styles.walletBtn}>
+             <MaterialCommunityIcons name="poker-chip" size={18} color="#000" />
+             <Text style={styles.walletText}>{coins !== null ? coins : '...'}</Text>
+             <Ionicons name="add-circle" size={20} color="#000" />
+          </LinearGradient>
         </TouchableOpacity>
       </View>
-    </ImageBackground>
-  );
-
-  const renderSetup = () => (
-    <View style={styles.container}>
-      <Text style={styles.title}>Game Setup</Text>
-      
-      <View style={styles.setupCard}>
-        <Text style={styles.label}>Number of Players:</Text>
-        <View style={styles.buttonGroup}>
-          {[2, 3, 4].map(num => (
-            <TouchableOpacity 
-              key={num} 
-              style={[styles.countButton, playerCount === num && styles.activeButton]}
-              onPress={() => handlePlayerCountChange(num)}
-            >
-              <Text style={[styles.buttonText, playerCount === num && styles.activeButtonText]}>{num}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={[styles.label, {marginTop: 20}]}>Player Settings:</Text>
-        <ScrollView style={{maxHeight: 350}} showsVerticalScrollIndicator={false}>
-          {playersData.map((p, i) => (
-             <View key={i} style={styles.playerSetupRow}>
-                <TextInput 
-                   style={styles.nameInput}
-                   value={p.name}
-                   onChangeText={(v) => updatePlayerData(i, 'name', v)}
-                   placeholder={`Name ${i+1}`}
-                   placeholderTextColor="#888"
-                />
-                <TextInput 
-                   style={styles.betInput}
-                   value={p.bet}
-                   onChangeText={(v) => updatePlayerData(i, 'bet', v)}
-                   keyboardType="numeric"
-                   placeholder="Bet"
-                   placeholderTextColor="#888"
-                />
-                <Text style={styles.currencyTag}>Birr</Text>
-             </View>
-          ))}
-        </ScrollView>
-      </View>
-
-      <TouchableOpacity style={styles.startButton} onPress={startGame}>
-         <Text style={styles.startButtonText}>Lets Go!</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={{marginTop:20}} onPress={resetToHome}>
-         <Text style={{color: '#999', fontSize: 16}}>Cancel</Text>
-      </TouchableOpacity>
     </View>
   );
+
+  
+  // ── OPERATOR PROFILE HELPERS ──────────────────────────────────────────
+  const saveOperatorProfiles = async (profiles) => {
+    setOperatorProfiles(profiles);
+    await AsyncStorage.setItem('kotariw_operators', JSON.stringify(profiles));
+  };
+
+  const handleAddOrEditOperator = async () => {
+    const name = newOperatorName.trim();
+    if (!name) return Alert.alert(t.error, t.operatorName + ' required');
+    if (editingOperatorId) {
+      // Edit existing
+      const updated = operatorProfiles.map(op =>
+        op.id === editingOperatorId ? { ...op, name } : op
+      );
+      await saveOperatorProfiles(updated);
+      if (activeOperatorId === editingOperatorId) setOperator(name);
+    } else {
+      // Add new
+      if (operatorProfiles.find(op => op.name.toLowerCase() === name.toLowerCase())) {
+        return Alert.alert(t.error, t.operatorExists);
+      }
+      const newOp = { id: Date.now().toString(), name };
+      await saveOperatorProfiles([...operatorProfiles, newOp]);
+    }
+    setNewOperatorName('');
+    setEditingOperatorId(null);
+  };
+
+  const handleSelectOperator = async (op) => {
+    setActiveOperatorId(op.id);
+    setOperator(op.name);
+    await AsyncStorage.setItem('kotariw_active_operator_id', op.id);
+  };
+
+  const handleDeleteOperator = (op) => {
+    Alert.alert(t.deleteOperator, t.confirmDeleteOp, [
+      { text: t.cancel, style: 'cancel' },
+      { text: t.deleteOperator, style: 'destructive', onPress: async () => {
+        const updated = operatorProfiles.filter(o => o.id !== op.id);
+        await saveOperatorProfiles(updated);
+        if (activeOperatorId === op.id) {
+          setActiveOperatorId(null);
+          setOperator('Operator 1');
+          await AsyncStorage.removeItem('kotariw_active_operator_id');
+        }
+      }}
+    ]);
+  };
+
+  const handleStartShift = async () => {
+    const now = new Date();
+    const shift = {
+      operatorId: activeOperatorId,
+      operatorName: operator,
+      startTime: getFormattedTime(),
+      startDate: getTodayDateString(),
+      games: 0,
+      earnings: 0,
+      commission: 0,
+    };
+    setShiftData(shift);
+    await AsyncStorage.setItem('kotariw_shift', JSON.stringify(shift));
+    triggerHaptic('medium');
+    Alert.alert(t.shiftStart, `${operator} - ${shift.startTime}`);
+  };
+
+  const handleEndShift = async () => {
+    if (!shiftData) return;
+    const commission = (shiftData.earnings * pctKotariw) / 100;
+    Alert.alert(
+      t.shiftReport,
+      `${t.activeOperator}: ${shiftData.operatorName}\n` +
+      `${t.shiftStart}: ${shiftData.startTime}\n` +
+      `${t.shiftGames}: ${shiftData.games}\n` +
+      `${t.shiftEarnings}: ${shiftData.earnings.toFixed(0)} Birr\n` +
+      `${t.shiftCommission}: ${commission.toFixed(0)} Birr`,
+      [
+        { text: t.cancel, style: 'cancel' },
+        { text: t.shiftEnd, style: 'destructive', onPress: async () => {
+          setShiftData(null);
+          await AsyncStorage.removeItem('kotariw_shift');
+        }}
+      ]
+    );
+  };
+
+  const renderOperatorModal = () => {
+    const activeOp = operatorProfiles.find(op => op.id === activeOperatorId);
+    const isShiftActive = shiftData && shiftData.operatorId === activeOperatorId;
+
+    return (
+      <Modal visible={operatorModalVisible} animationType="slide" transparent={true}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={['#1a1a2e', '#0f0f1c']} style={styles.modalDarkGradient}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t.operatorProfiles}</Text>
+                <TouchableOpacity onPress={() => { setOperatorModalVisible(false); setNewOperatorName(''); setEditingOperatorId(null); }}>
+                  <Ionicons name="close-circle" size={32} color="#ff4444" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+                {/* Active Operator + Shift */}
+                <LinearGradient colors={['#1a3a1a','#0d2010']} style={{ borderRadius: 14, padding: 15, marginBottom: 18, borderWidth: 1, borderColor: '#00e676' }}>
+                  <Text style={{ color: '#aab', fontSize: 12, fontWeight: 'bold', marginBottom: 6 }}>{t.activeOperator}</Text>
+                  <Text style={{ color: '#00e676', fontSize: 18, fontWeight: 'bold' }}>{activeOp ? activeOp.name : '—'}</Text>
+                  {isShiftActive ? (
+                    <View style={{ marginTop: 10 }}>
+                      <Text style={{ color: '#ffcc00', fontSize: 12 }}>
+                        ⏱ {t.shiftStart}: {shiftData.startTime}  |  🎱 {t.shiftGames}: {shiftData.games}  |  💰 {shiftData.earnings.toFixed(0)} Birr
+                      </Text>
+                      <TouchableOpacity onPress={handleEndShift} style={{ marginTop: 10 }}>
+                        <LinearGradient colors={['#ff4444','#cc0000']} style={{ padding: 10, borderRadius: 10, alignItems: 'center' }}>
+                          <Text style={{ color: '#fff', fontWeight: 'bold' }}>{t.shiftEnd}</Text>
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    activeOp && (
+                      <TouchableOpacity onPress={handleStartShift} style={{ marginTop: 10 }}>
+                        <LinearGradient colors={['#00e676','#00a855']} style={{ padding: 10, borderRadius: 10, alignItems: 'center' }}>
+                          <Text style={{ color: '#111', fontWeight: 'bold' }}>{t.startShift}</Text>
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </LinearGradient>
+
+                {/* Operator List */}
+                <Text style={{ color: '#aab', fontSize: 13, fontWeight: 'bold', marginBottom: 10 }}>{t.selectOperator}</Text>
+                {operatorProfiles.length === 0 ? (
+                  <Text style={{ color: '#556', textAlign: 'center', marginVertical: 15 }}>{t.noOperators}</Text>
+                ) : (
+                  operatorProfiles.map(op => {
+                    const isActive = op.id === activeOperatorId;
+                    return (
+                      <TouchableOpacity key={op.id} onPress={() => handleSelectOperator(op)}>
+                        <LinearGradient
+                          colors={isActive ? ['#1a6b3a','#0d3d1f'] : ['#2a2a3e','#1a1a2e']}
+                          style={{ flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: isActive ? '#00e676' : '#334' }}
+                        >
+                          <Ionicons name={isActive ? 'person' : 'person-outline'} size={22} color={isActive ? '#00e676' : '#aab'} />
+                          <Text style={{ flex: 1, color: isActive ? '#00e676' : '#fff', fontWeight: 'bold', fontSize: 15, marginLeft: 12 }}>{op.name}</Text>
+                          {isActive && <View style={{ backgroundColor: '#00e676', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginRight: 8 }}><Text style={{ color: '#111', fontSize: 10, fontWeight: 'bold' }}>ACTIVE</Text></View>}
+                          <TouchableOpacity onPress={() => { setEditingOperatorId(op.id); setNewOperatorName(op.name); }} style={{ padding: 6, marginRight: 4 }}>
+                            <Ionicons name="pencil" size={16} color="#ffcc00" />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteOperator(op)} style={{ padding: 6 }}>
+                            <Ionicons name="trash" size={16} color="#ff4444" />
+                          </TouchableOpacity>
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+
+                {/* Add / Edit Form */}
+                <View style={{ marginTop: 16, borderTopWidth: 1, borderTopColor: '#334', paddingTop: 16 }}>
+                  <Text style={{ color: '#aab', fontSize: 12, fontWeight: 'bold', marginBottom: 8 }}>
+                    {editingOperatorId ? t.editOperator : t.addOperator}
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TextInput
+                      style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', color: '#fff', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#445', fontSize: 15, marginRight: 10 }}
+                      value={newOperatorName}
+                      onChangeText={setNewOperatorName}
+                      placeholder={t.operatorName}
+                      placeholderTextColor="#556"
+                    />
+                    <TouchableOpacity onPress={handleAddOrEditOperator}>
+                      <LinearGradient colors={['#ffcc00','#e6a800']} style={{ padding: 12, borderRadius: 10 }}>
+                        <Ionicons name={editingOperatorId ? 'checkmark' : 'add'} size={22} color="#111" />
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                  {editingOperatorId && (
+                    <TouchableOpacity onPress={() => { setEditingOperatorId(null); setNewOperatorName(''); }} style={{ marginTop: 8, alignItems: 'center' }}>
+                      <Text style={{ color: '#889', fontSize: 13 }}>{t.cancel}</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </ScrollView>
+            </LinearGradient>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
+
+  const renderMenuModal = () => {
+    return (
+      <Modal visible={menuVisible} animationType="fade" transparent={true}>
+        <TouchableOpacity 
+          style={styles.modalBg} 
+          activeOpacity={1} 
+          onPress={() => setMenuVisible(false)}
+        >
+          <View style={styles.menuModalContent}>
+            <LinearGradient colors={['#2a1a3e', '#1a0f2c']} style={styles.modalDarkGradient}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t.menuTitle}</Text>
+                <TouchableOpacity onPress={() => setMenuVisible(false)}>
+                  <Ionicons name="close-circle" size={30} color="#ff4444" />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('light');
+                  setMenuVisible(false);
+                  setCurrentScreen('HISTORY');
+                }}
+              >
+                <Ionicons name="trophy" size={24} color="#ffcc00" />
+                <Text style={styles.menuOptionText}>{t.gameHistory} (100)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('light');
+                  setMenuVisible(false);
+                  setOperatorModalVisible(true);
+                }}
+              >
+                <Ionicons name="people" size={24} color="#00cfff" />
+                <Text style={styles.menuOptionText}>{t.operatorProfiles}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('light');
+                  setMenuVisible(false);
+                  setDashboardVisible(true);
+                }}
+              >
+                <Ionicons name="settings" size={24} color="#00e676" />
+                <Text style={styles.menuOptionText}>{t.kotariwDashboard}</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+
+  const renderKotariwDashboardModal = () => {
+    const wVal = Number(winnerInput || 0);
+    const tVal = Number(tableInput || 0);
+    const kVal = Number(kotariwInput || 0);
+    const totalSum = wVal + tVal + kVal;
+    const isValid = totalSum === 100;
+
+    const handleSavePricing = async () => {
+      triggerHaptic('medium');
+      if (!isValid) {
+        Alert.alert(t.error, t.invalidPercentages);
+        return;
+      }
+      try {
+        setPctWinner(wVal);
+        setPctTable(tVal);
+        setPctKotariw(kVal);
+
+        await AsyncStorage.setItem('kotariw_pct_winner', winnerInput);
+        await AsyncStorage.setItem('kotariw_pct_table', tableInput);
+        await AsyncStorage.setItem('kotariw_pct_kotariw', kotariwInput);
+
+        playSound('payment_success'); // success chime
+        Alert.alert(t.kotariwDashboard, t.pricingSaved);
+        setDashboardVisible(false);
+      } catch (err) {
+        console.error(err);
+        Alert.alert(t.error, err.message);
+      }
+    };
+
+    return (
+      <Modal visible={dashboardVisible} animationType="slide" transparent={true}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBg}
+        >
+          <View style={styles.modalContent}>
+            <LinearGradient colors={['#1a1a2e', '#0f0f1c']} style={styles.modalDarkGradient}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t.kotariwDashboard}</Text>
+                <TouchableOpacity onPress={() => setDashboardVisible(false)}>
+                  <Ionicons name="close-circle" size={32} color="#ff4444" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={[styles.storeSubtitle, { marginBottom: 20 }]}>{t.pricingSettings}</Text>
+
+                {/* Winner Share Input */}
+                <View style={styles.dashboardInputRow}>
+                  <Text style={styles.dashboardInputLabel}>{t.winnerSharePct}:</Text>
+                  <TextInput
+                    style={styles.dashboardInput}
+                    value={winnerInput}
+                    onChangeText={setWinnerInput}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.dashboardPctSign}>%</Text>
+                </View>
+
+                {/* Table Share Input */}
+                <View style={styles.dashboardInputRow}>
+                  <Text style={styles.dashboardInputLabel}>{t.tableSharePct}:</Text>
+                  <TextInput
+                    style={styles.dashboardInput}
+                    value={tableInput}
+                    onChangeText={setTableInput}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.dashboardPctSign}>%</Text>
+                </View>
+
+                {/* Kotariw Share Input */}
+                <View style={styles.dashboardInputRow}>
+                  <Text style={styles.dashboardInputLabel}>{t.hostSharePct}:</Text>
+                  <TextInput
+                    style={styles.dashboardInput}
+                    value={kotariwInput}
+                    onChangeText={setKotariwInput}
+                    keyboardType="numeric"
+                    maxLength={3}
+                  />
+                  <Text style={styles.dashboardPctSign}>%</Text>
+                </View>
+
+                {/* Validation Indicator */}
+                <View style={[
+                  styles.dashboardValidationContainer, 
+                  { backgroundColor: isValid ? 'rgba(0, 230, 118, 0.12)' : 'rgba(255, 68, 68, 0.12)' }
+                ]}>
+                  <Text style={[
+                    styles.dashboardValidationText, 
+                    { color: isValid ? '#00e676' : '#ff4444' }
+                  ]}>
+                    {isValid 
+                      ? `Total: ${totalSum}% (${t.savePricing})` 
+                      : `Total: ${totalSum}% (${t.totalShareWarning})`
+                    }
+                  </Text>
+                </View>
+
+                {/* Save Button */}
+                <TouchableOpacity 
+                  style={[styles.startBtnOuter, { opacity: isValid ? 1 : 0.5 }]} 
+                  onPress={handleSavePricing}
+                  disabled={!isValid}
+                >
+                  <LinearGradient colors={['#00e676', '#00a855']} style={styles.startBtnInner}>
+                    <Text style={styles.startBtnText}>{t.savePricing}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ScrollView>
+            </LinearGradient>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+    );
+  };
+
+const renderStore = () => {
+    return (
+      <Modal visible={storeVisible} animationType="slide" transparent={true}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContent}>
+            <LinearGradient colors={['#2a1a3e', '#1a0f2c']} style={styles.modalDarkGradient}>
+              
+              {/* HEADER ROW */}
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {paymentStep !== 'packages' && (
+                    <TouchableOpacity 
+                      onPress={() => {
+                        triggerHaptic('light');
+                        if (paymentStep === 'method') setPaymentStep('packages');
+                        else if (paymentStep === 'manual') setPaymentStep('method');
+                        else if (paymentStep === 'settings') setPaymentStep('packages');
+                      }}
+                      style={{ marginRight: 10 }}
+                    >
+                      <Ionicons name="arrow-back" size={24} color="#00e676" />
+                    </TouchableOpacity>
+                  )}
+                  <Text style={styles.modalTitle}>
+                    {paymentStep === 'settings' ? t.chapaApiSettings : t.coinStore}
+                  </Text>
+                </View>
+                
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  {paymentStep === 'packages' && (
+                    <TouchableOpacity onPress={() => { triggerHaptic('light'); setPaymentStep('settings'); }}>
+                      <Ionicons name="settings-outline" size={24} color="#aab" />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => { triggerHaptic('medium'); setStoreVisible(false); }}>
+                    <Ionicons name="close-circle" size={32} color="#ff4444" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* STEP 1: PACKAGES LIST */}
+              {paymentStep === 'packages' && (
+                <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+                  <Text style={styles.storeSubtitle}>{t.coinDesc}</Text>
+                  
+                  {/* Package 1 */}
+                  <TouchableOpacity 
+                    onPress={() => {
+                      triggerHaptic('light');
+                      setSelectedPackage({ amount: 1, price: 5 });
+                      setPaymentStep('method');
+                    }}
+                    style={styles.packageCard}
+                  >
+                    <LinearGradient colors={['#332255', '#1e1233']} style={styles.packageCardGradient}>
+                      <View style={styles.packageIconWrap}>
+                        <MaterialCommunityIcons name="poker-chip" size={32} color="#00e676" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.packageTitle}>1 Coin</Text>
+                        <Text style={styles.packagePrice}>5 Birr</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#889" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  {/* Package 2 - Best Value */}
+                  <TouchableOpacity 
+                    onPress={() => {
+                      triggerHaptic('light');
+                      setSelectedPackage({ amount: 10, price: 50 });
+                      setPaymentStep('method');
+                    }}
+                    style={[styles.packageCard, styles.packageCardPopular]}
+                  >
+                    <LinearGradient colors={['#4c3600', '#261b00']} style={styles.packageCardGradient}>
+                      <View style={styles.packageIconWrap}>
+                        <MaterialCommunityIcons name="poker-chip" size={36} color="#ffcc00" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.packageTitle, { color: '#ffcc00' }]}>10 Coins</Text>
+                        <Text style={styles.packagePrice}>50 Birr</Text>
+                      </View>
+                      <View style={styles.popularBadge}>
+                        <Text style={styles.popularBadgeText}>POPULAR</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#ffcc00" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  {/* Package 3 - VIP */}
+                  <TouchableOpacity 
+                    onPress={() => {
+                      triggerHaptic('light');
+                      setSelectedPackage({ amount: 50, price: 250 });
+                      setPaymentStep('method');
+                    }}
+                    style={styles.packageCard}
+                  >
+                    <LinearGradient colors={['#551a3b', '#2e0e20']} style={styles.packageCardGradient}>
+                      <View style={styles.packageIconWrap}>
+                        <MaterialCommunityIcons name="poker-chip" size={38} color="#cc0066" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.packageTitle, { color: '#ff44aa' }]}>50 Coins</Text>
+                        <Text style={styles.packagePrice}>250 Birr</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#889" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </ScrollView>
+              )}
+
+              {/* STEP 2: PAYMENT METHOD */}
+              {paymentStep === 'method' && selectedPackage && (
+                <View style={{ paddingVertical: 10 }}>
+                  <Text style={styles.storeSubtitle}>
+                    {t.selectPaymentMethod} ({selectedPackage.amount} {selectedPackage.amount === 1 ? 'Coin' : 'Coins'} - {selectedPackage.price} Birr)
+                  </Text>
+
+                  {/* Chapa Option */}
+                  <TouchableOpacity onPress={startChapaPayment} style={{ marginTop: 15 }}>
+                    <LinearGradient colors={['#00cfff', '#007bb6']} style={styles.storeBtnInner}>
+                      <Ionicons name="card" size={24} color="#111" />
+                      <Text style={styles.storeBtnText}>{t.telebirrOrBank}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  {/* Manual Bank Transfer Option */}
+                  <TouchableOpacity onPress={() => { triggerHaptic('light'); setPaymentStep('manual'); }} style={{ marginTop: 15 }}>
+                    <LinearGradient colors={['#ff8a65', '#d84315']} style={styles.storeBtnInner}>
+                      <Ionicons name="cash" size={24} color="#fff" />
+                      <Text style={[styles.storeBtnText, { color: '#fff' }]}>{t.manualBankTransfer}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* STEP 3: MANUAL TRANSFER INSTRUCTIONS */}
+              {paymentStep === 'manual' && selectedPackage && (
+                <View style={{ paddingVertical: 10 }}>
+                  <Text style={[styles.modalTitle, { fontSize: 18, color: '#ffcc00', alignSelf: 'center', marginBottom: 10 }]}>
+                    {t.instructions}
+                  </Text>
+                  
+                  <View style={styles.instructionContainer}>
+                    <Text style={styles.instructionText}>{t.manualInstructions}</Text>
+                  </View>
+
+                  <TouchableOpacity onPress={handleConfirmManualTransfer} style={{ marginTop: 25 }}>
+                    <LinearGradient colors={['#00e676', '#00a855']} style={styles.storeBtnInner}>
+                      <Ionicons name="checkmark-circle" size={24} color="#111" />
+                      <Text style={styles.storeBtnText}>{t.iHaveTransferred}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* STEP 4: PROCESSING / LOADING */}
+              {paymentStep === 'processing' && (
+                <View style={{ paddingVertical: 40, alignItems: 'center', justifyContent: 'center' }}>
+                  <ActivityIndicator size="large" color="#00e676" />
+                  <Text style={{ color: '#fff', fontSize: 16, marginTop: 20, textAlign: 'center', lineHeight: 24 }}>
+                    {t.paymentVerifying}
+                  </Text>
+                </View>
+              )}
+
+              {/* STEP 5: SETTINGS */}
+              {paymentStep === 'settings' && (
+                <KeyboardAvoidingView behavior="padding" style={{ paddingVertical: 10 }}>
+                  <Text style={styles.settingsLabel}>{t.publicKey}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={pubKeyInput}
+                    onChangeText={setPubKeyInput}
+                    placeholder="CHAPUBK_TEST-..."
+                    placeholderTextColor="#556"
+                    autoCapitalize="none"
+                  />
+
+                  <Text style={[styles.settingsLabel, { marginTop: 15 }]}>{t.secretKey}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={secKeyInput}
+                    onChangeText={setSecKeyInput}
+                    placeholder="CHASECK_TEST-..."
+                    placeholderTextColor="#556"
+                    secureTextEntry={true}
+                    autoCapitalize="none"
+                  />
+
+                  <TouchableOpacity onPress={handleSaveChapaKeys} style={{ marginTop: 30 }}>
+                    <LinearGradient colors={['#ffcc00', '#e6a800']} style={styles.storeBtnInner}>
+                      <Ionicons name="save" size={22} color="#111" />
+                      <Text style={styles.storeBtnText}>{t.saveSettings}</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </KeyboardAvoidingView>
+              )}
+
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderHome = () => {
+    // Build top 3 daily players from history
+    const topPlayers = (() => {
+      const scores = {};
+      gameHistory.forEach(g => {
+        if (!scores[g.winnerId]) scores[g.winnerId] = 0;
+        scores[g.winnerId] += g.winnerScore;
+      });
+      return Object.entries(scores)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, score]) => ({ name, score }));
+    })();
+
+    const rankMedals = ['🥇', '🥈', '🥉'];
+
+    return (
+    <ImageBackground source={require('./assets/splash_bg.png')} style={styles.fullScreenBg}>
+      <StatusBar barStyle="light-content" hidden={false} />
+      {renderStore()}
+
+      {/* TOP BAR: Menu on left, Lang + Sound + Coin pill + gem on right */}
+      <View style={styles.homeTopBar}>
+        <TouchableOpacity style={styles.menuBtn} onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}>
+          <Ionicons name="menu" size={26} color="#fff" />
+        </TouchableOpacity>
+        
+        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+          <TouchableOpacity style={styles.langBtn} onPress={toggleLang}>
+            <Text style={styles.langBtnText}>{t.language}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.langBtn} onPress={toggleSound}>
+            <Ionicons name={soundOn ? 'volume-high' : 'volume-mute'} size={18} color={soundOn ? '#00e676' : '#666'} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.homeCoinPill} onPress={() => setStoreVisible(true)}>
+            <Text style={styles.homeCoinText}>{coins !== null ? coins : '...'}</Text>
+            <MaterialCommunityIcons name="poker-chip" size={22} color="#FFD700" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.homeGemBtn} onPress={() => setStoreVisible(true)}>
+            <MaterialCommunityIcons name="diamond-stone" size={24} color="#00cfff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1, paddingTop: 110, paddingBottom: 30 }}
+        >
+          {/* LOGO */}
+          <View style={styles.logoArea}>
+            <View style={styles.logoRow}>
+              <LinearGradient colors={['#1a0a00', '#3d1f00']} style={styles.logoBall}>
+                <Text style={styles.logoBallText}>8</Text>
+              </LinearGradient>
+              <Text style={styles.logoText}>KOTARIEW</Text>
+            </View>
+            <View style={styles.flameBar} />
+          </View>
+
+          {/* CENTERED PLAY NOW HERO CARD */}
+          <View style={{ alignItems: 'center', marginVertical: 24, paddingHorizontal: 20 }}>
+            <TouchableOpacity 
+              style={{ width: '100%', maxWidth: 340 }} 
+              onPress={() => setSetupVisible(true)}
+              activeOpacity={0.85}
+            >
+              <LinearGradient colors={['#1a6b3a', '#0d3d1f']} style={[styles.mainCard, { minHeight: 200 }]}>
+                <View style={styles.mainCardIconCircle}>
+                  <Text style={styles.mainCardBallNum}>8</Text>
+                </View>
+                <Text style={[styles.mainCardTitle, { fontSize: 22 }]}>{t.playNow}</Text>
+                <Text style={styles.mainCardSub}>{t.multiplayer}</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+          {/* DAILY TOP PLAYERS over the table */}
+          <View style={styles.dailySection}>
+            <Text style={styles.dailyTitle}>{t.dailyTopPlayers}</Text>
+            {topPlayers.length === 0 ? (
+              <Text style={styles.dailyEmpty}>{t.playToAppear}</Text>
+            ) : (
+              topPlayers.map((p, i) => (
+                <View key={i} style={styles.dailyRow}>
+                  <Text style={styles.dailyRank}>{rankMedals[i]}</Text>
+                  <View style={styles.dailyAvatar}>
+                    <Ionicons name="person" size={18} color="#fff" />
+                  </View>
+                  <Text style={styles.dailyName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={styles.dailyScore}>{p.score}</Text>
+                </View>
+              ))
+            )}
+
+            {/* Session config row */}
+            <View style={styles.sessionRowInline}>
+              <TextInput
+                style={styles.sessionInputSmall}
+                value={tableNumber}
+                onChangeText={(v) => { setTableNumber(v); saveSessionState(sessionGamesCount, sessionTotalPot, operator, v); }}
+                placeholder={t.tableLabel} placeholderTextColor="#889"
+              />
+              <TouchableOpacity
+                style={[styles.sessionInputSmall, {flex: 2, marginLeft: 8, justifyContent: 'center'}]}
+                onPress={() => { triggerHaptic('light'); setOperatorModalVisible(true); }}
+              >
+                <Text style={{ color: operator ? '#00e676' : '#889', fontWeight: 'bold', fontSize: 14 }}>
+                  👤 {operator || t.operatorLabel}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.sessionStatsRow}>
+              <Text style={styles.sessionStatText}>🎱 {t.gamesLabel}: <Text style={{color:'#fff', fontWeight:'bold'}}>{sessionGamesCount}</Text></Text>
+              <Text style={styles.sessionStatText}>💰 {t.potLabel}: <Text style={{color:'#FFD700', fontWeight:'bold'}}>{sessionTotalPot} Birr</Text></Text>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Setup Modal */}
+      <Modal visible={setupVisible} animationType="slide" transparent={true}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBg}
+        >
+          <View style={styles.modalContent}>
+            <LinearGradient colors={['#1a1a2e', '#0f0f1c']} style={styles.modalDarkGradient}>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ flexGrow: 1 }}
+              >
+                <View style={styles.modalHeader}>
+                   <Text style={styles.modalTitle}>{t.lobbySetup}</Text>
+                   <TouchableOpacity onPress={() => setSetupVisible(false)}>
+                      <Ionicons name="close-circle" size={32} color="#ff4444" />
+                   </TouchableOpacity>
+                </View>
+
+                <Text style={styles.label}>{t.numPlayers}</Text>
+                <View style={styles.buttonGroup}>
+                  {[2, 3, 4].map(num => (
+                    <TouchableOpacity key={num} onPress={() => handlePlayerCountChange(num)} style={{flex:1, marginHorizontal: 5}}>
+                      <LinearGradient 
+                        colors={playerCount === num ? ['#00e676', '#00a855'] : ['#333', '#111']} 
+                        style={styles.countButton}
+                      >
+                        <Text style={[styles.buttonText, playerCount === num && styles.activeButtonText]}>{num}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={[styles.label, {marginTop: 20}]}>{t.playerBets}</Text>
+                <View style={{ marginBottom: 10 }}>
+                  {playersData.map((p, i) => (
+                    <View key={i} style={styles.playerSetupRow}>
+                        <View style={styles.nameInputWrapper}>
+                          <TextInput 
+                            style={styles.modalInputNameWithBtn}
+                            value={p.name}
+                            onChangeText={(v) => updatePlayerData(i, 'name', v)}
+                            placeholder={`Player ${i+1} Name`}
+                            placeholderTextColor="#667"
+                          />
+                          <TouchableOpacity style={styles.frequentPlayerBtn} onPress={() => openPlayerPicker(i)}>
+                            <Ionicons name="people" size={20} color="#00e676" />
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.betInputWrapper}>
+                           <TextInput 
+                              style={styles.modalInputBet}
+                              value={p.bet}
+                              onChangeText={(v) => updatePlayerData(i, 'bet', v)}
+                              keyboardType="numeric"
+                              placeholder="Bet"
+                              placeholderTextColor="#667"
+                           />
+                           <Text style={styles.currTag}>Birr</Text>
+                        </View>
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity style={styles.startBtnOuter} onPress={startGame}>
+                  <LinearGradient colors={['#ffcc00', '#e6a800']} style={styles.startBtnInner}>
+                     <Text style={styles.startBtnText}>{t.startMatch}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ScrollView>
+            </LinearGradient>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Frequent Player Selection Modal */}
+      <Modal visible={playerPickerVisible} animationType="fade" transparent={true}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalContentSmall}>
+            <LinearGradient colors={['#2a1a3e', '#1a0f2c']} style={styles.modalDarkGradient}>
+              <View style={styles.modalHeader}>
+                 <Text style={styles.modalTitle}>{t.savedPlayers}</Text>
+                 <TouchableOpacity onPress={() => setPlayerPickerVisible(false)}>
+                    <Ionicons name="close-circle" size={32} color="#ff4444" />
+                 </TouchableOpacity>
+              </View>
+
+              {savedPlayers.length === 0 ? (
+                <Text style={{color: '#aab', textAlign: 'center', marginVertical: 20}}>
+                  No saved players yet. Start a match to save names automatically!
+                </Text>
+              ) : (
+                <ScrollView style={{maxHeight: 250}} showsVerticalScrollIndicator={true}>
+                  {savedPlayers.map((playerName, index) => (
+                    <TouchableOpacity 
+                      key={index} 
+                      style={styles.playerPickRow}
+                      onPress={() => selectFrequentPlayer(playerName)}
+                    >
+                      <Ionicons name="person" size={18} color="#ffcc00" style={{marginRight: 10}} />
+                      <Text style={styles.playerPickText}>{playerName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
+    </ImageBackground>
+    );
+  };
 
   const renderGame = () => {
     if (!status) return null;
 
     if (winner) {
        return (
-         <View style={styles.winnerContainer}>
-           <Text style={styles.winnerText}>🏆 {winner.winner_id} Wins!</Text>
-           <Text style={styles.scoreText}>Final Score: {winner.winner_score}</Text>
-           
-           <View style={styles.financialCard}>
-             <Text style={styles.financialTitle}>Prize Breakdown</Text>
-             <Text style={styles.financialText}>Total Pot: {winner.total_pot.toFixed(2)} Birr</Text>
-             <View style={styles.divider} />
-             <Text style={styles.financialText}>🥇 Winner ({winner.winner_id}): {(winner.prize_winner).toFixed(2)}</Text>
-             <Text style={styles.financialText}>🏠 Kotariw (Host): {(winner.prize_kotariw).toFixed(2)}</Text>
-             <Text style={styles.financialText}>🎲 Game Fee: {(winner.prize_game).toFixed(2)}</Text>
-           </View>
+         <ImageBackground source={require('./assets/splash_bg.png')} style={styles.fullScreenBg}>
+           <View style={styles.bgOverlayHeavy} />
+           <View style={styles.winnerContainer}>
+             <Ionicons name="trophy" size={100} color="#ffcc00" />
+             <Text style={styles.winnerText}>{winner.winner_id} {t.wins}</Text>
+             <Text style={styles.finalScoreText}>{t.score}: {winner.winner_score}</Text>
+             
+<LinearGradient colors={['#2a2a3e', '#1a1a2e']} style={styles.financialCard}>
+                <Text style={styles.financialTitle}>{t.matchResults}</Text>
+                <View style={styles.finDivider} />
+                
+                <View style={styles.finRow}>
+                  <Text style={styles.finLabel}>{t.totalPot}:</Text>
+                  <Text style={styles.finValue}>{winner.total_pot.toFixed(0)} Birr</Text>
+                </View>
+                
+                <View style={styles.finRow}>
+                  <Text style={styles.finLabel}>🥇 {t.winnerShare} ({pctWinner}%):</Text>
+                  <Text style={styles.finValue}>{winner.prize_winner.toFixed(0)} Birr</Text>
+                </View>
 
-           <TouchableOpacity style={styles.startButton} onPress={resetToHome}>
-              <Text style={styles.startButtonText}>Main Menu</Text>
-           </TouchableOpacity>
-         </View>
+                {pctTable > 0 && (
+                  <View style={styles.finRow}>
+                    <Text style={styles.finLabel}>🎱 {t.tableShare} ({pctTable}%):</Text>
+                    <Text style={styles.finValue}>{winner.prize_table.toFixed(0)} Birr</Text>
+                  </View>
+                )}
+                
+                <View style={styles.finRow}>
+                  <Text style={styles.finLabel}>🏠 {t.kotariwShare} ({pctKotariw}%):</Text>
+                  <Text style={styles.finValue}>{winner.prize_kotariw.toFixed(0)} Birr</Text>
+                </View>
+              </LinearGradient>
+
+             <TouchableOpacity onPress={resetToHome} style={{marginTop: 30}}>
+                <LinearGradient colors={['#00e676', '#00a855']} style={styles.returnBtn}>
+                   <Text style={styles.returnBtnText}>{t.mainMenu}</Text>
+                </LinearGradient>
+             </TouchableOpacity>
+           </View>
+         </ImageBackground>
        );
     }
 
     return (
-      <View style={styles.container}>
-        <Text style={styles.infoText}>Turn: {status.current_player}</Text>
-        <Text style={styles.potText}>Total Pot: {status.total_pot} Birr</Text>
-        
-        {/* Render Players Data dynamically */}
-        <View style={styles.scoresWrap}>
-          {Object.keys(status.players).length > 0 && Array.isArray(status.players) ? (
-            status.players.map(p => (
-              <View key={p.id} style={[styles.playerCard, status.current_player === p.id && styles.activePlayerCard]}>
-                <Text numberOfLines={1} style={styles.playerName}>{p.id}</Text>
-                <Text style={styles.playerScore}>{p.score}</Text>
-              </View>
-            ))
-          ) : (
-             Object.keys(status.players).map(pid => (
-              <View key={pid} style={[styles.playerCard, status.current_player === pid && styles.activePlayerCard]}>
-                <Text numberOfLines={1} style={styles.playerName}>{pid}</Text>
-                <Text style={styles.playerScore}>{status.players[pid].total_score}</Text>
-              </View>
-             ))
-          )}
-        </View>
+      <View style={styles.gameContainer}>
+        {renderGameHeader()}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.gameScrollContent}
+        >
+          <View style={styles.gameInfoBox}>
+             <Text style={styles.turnText}>{t.turn}: <Text style={{color: '#00e676'}}>{status.current_player}</Text></Text>
+             <Text style={styles.potText}>{t.pot}: {status.total_pot} Birr | Table {tableNumber}</Text>
+          </View>
+          
+          <View style={styles.scoresWrap}>
+            {Object.keys(status.players).map((key, i) => {
+              const p = Array.isArray(status.players) ? status.players[i] : status.players[key];
+              const pId = Array.isArray(status.players) ? p.id : key;
+              const pScore = Array.isArray(status.players) ? p.score : p.total_score;
+              const isActive = status.current_player === pId;
 
-        {/* Selection Grid */}
-        <View style={styles.grid}>
-          {status.remaining_numbers.map(num => (
-            <TouchableOpacity 
-              key={num}
-              style={[styles.ballButton, selectedBall === num && styles.selectedBall]}
-              onPress={() => setSelectedBall(num)}
-            >
-              <Text style={styles.ballText}>{num}</Text>
+              return (
+                <LinearGradient 
+                   key={pId}
+                   colors={isActive ? ['#00e676', '#004d26'] : ['#2a2a3e', '#1a1a2e']}
+                   style={[styles.playerCard, isActive && styles.cardActiveGlow]}
+                >
+                  <Text numberOfLines={1} style={[styles.playerName, isActive && {color:'#111'}]}>{pId}</Text>
+                  <Text style={[styles.playerScore, isActive && {color:'#fff'}]}>{pScore}</Text>
+                  
+                  {p.history && p.history.length > 0 && (
+                    <View style={styles.miniBallsRow}>
+                      {p.history.map((item, idx) => (
+                        <MiniatureBall key={idx} item={item} />
+                      ))}
+                    </View>
+                  )}
+                </LinearGradient>
+              );
+            })}
+          </View>
+
+          {/* ── 2D POOL TABLE ── */}
+          <View style={styles.poolTableWrapper}>
+            <View style={styles.poolTableOuter}>
+              {/* Felt surface */}
+              <LinearGradient
+                colors={['#1a5c2e', '#0e3d1f', '#1a5c2e']}
+                style={styles.poolTableFelt}
+              >
+                {/* Rail markings (corner + side pockets) */}
+                {[
+                  { top: -8, left: -8 },
+                  { top: -8, right: -8 },
+                  { bottom: -8, left: -8 },
+                  { bottom: -8, right: -8 },
+                  { top: '50%', left: -8, marginTop: -8 },
+                  { top: '50%', right: -8, marginTop: -8 },
+                ].map((pos, i) => (
+                  <View key={i} style={[styles.pocketDot, pos]} />
+                ))}
+
+                {/* Balls — spread evenly so no overlap, arc/scattered layout */}
+                {[
+                  { num: 3,  top: '12%', left: '18%' },
+                  { num: 4,  top: '32%', left: '10%' },
+                  { num: 5,  top: '55%', left: '15%' },
+                  { num: 6,  top: '75%', left: '28%' },
+                  { num: 7,  top: '85%', left: '48%' },
+                  { num: 8,  top: '48%', left: '47%' },
+                  { num: 9,  top: '20%', left: '48%' },
+                  { num: 10, top: '8%',  left: '65%' },
+                  { num: 11, top: '28%', left: '76%' },
+                  { num: 12, top: '50%', left: '82%' },
+                  { num: 13, top: '70%', left: '72%' },
+                  { num: 14, top: '83%', left: '58%' },
+                  { num: 15, top: '12%', left: '34%' },
+                ].map(({ num, top, left }) => {
+                  const remaining = status.remaining_numbers;
+                  const isPocketed = !remaining.includes(num);
+                  if (isPocketed) return null;
+                  const isSelected = selectedBall === num;
+                  const ballColor = getBallColor(num);
+                  const isStripe = num >= 9 && num <= 15;
+                  const isBall8 = num === 8;
+                  return (
+                    <TouchableOpacity
+                      key={num}
+                      style={[
+                        styles.tableBallTouch,
+                        { top, left },
+                      ]}
+                      onPress={() => {
+                        triggerHaptic('light');
+                        setSelectedBall(num);
+                        playSound('ball_select');
+                      }}
+                      activeOpacity={0.75}
+                    >
+                      {/* Glow ring behind the ball when selected */}
+                      {isSelected && <View style={styles.tableBallGlow} />}
+
+                      {isStripe ? (
+                        /* STRIPE ball: white base, colour band in the middle */
+                        <View style={[styles.tableBall, styles.tableBallSolid, { backgroundColor: '#fff', borderColor: 'rgba(255,255,255,0.35)' }]}>
+                          {/* Coloured stripe band */}
+                          <View style={[styles.tableBallStripeBand, { backgroundColor: ballColor }]} />
+                          {/* White dot with number */}
+                          <View style={[styles.tableBallDot, { zIndex: 3 }]}>
+                            <Text style={styles.tableBallNumText}>{num}</Text>
+                          </View>
+                        </View>
+                      ) : (
+                        /* SOLID ball: solid colour, white dot with number */
+                        <View style={[styles.tableBall, styles.tableBallSolid, { backgroundColor: ballColor, borderColor: 'rgba(255,255,255,0.25)' }]}>
+                          {/* Subtle highlight glare */}
+                          <View style={styles.tableBallGlare} />
+                          {/* White dot with number */}
+                          <View style={styles.tableBallDot}>
+                            <Text style={[styles.tableBallNumText, isBall8 && { color: '#fff' }]}>{num}</Text>
+                          </View>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </LinearGradient>
+            </View>
+            {selectedBall ? (
+              <Text style={styles.tableBallHint}>Ball <Text style={{ color: '#ffcc00', fontWeight: 'bold' }}>{selectedBall}</Text> selected — tap ADD or PENALIZE</Text>
+            ) : (
+              <Text style={styles.tableBallHint}>Tap a ball on the table to select it</Text>
+            )}
+          </View>
+
+          <View style={styles.actionRow}>
+             <TouchableOpacity style={{flex:1.2, marginRight:6}} onPress={() => sendAction('add')}>
+                <LinearGradient colors={['#00e676', '#00aa55']} style={styles.actionGradiant}>
+                   <Ionicons name="add-circle" size={20} color="#111" />
+                   <Text style={styles.actionBtnText}> {t.add}</Text>
+                </LinearGradient>
+             </TouchableOpacity>
+
+             <TouchableOpacity 
+               style={{flex:1, marginHorizontal:4}} 
+               onPress={handleUndo}
+               disabled={!status.can_undo}
+             >
+                <LinearGradient 
+                  colors={status.can_undo ? ['#ffcc00', '#e6a800'] : ['#333', '#1e1e2d']} 
+                  style={styles.actionGradiant}
+                >
+                   <Ionicons name="arrow-undo" size={20} color={status.can_undo ? '#111' : '#666'} />
+                   <Text style={[styles.actionBtnText, {color: status.can_undo ? '#111' : '#666'}]}> {t.undo}</Text>
+                </LinearGradient>
+             </TouchableOpacity>
+
+             <TouchableOpacity style={{flex:1.2, marginLeft:6}} onPress={() => sendAction('subtract')}>
+                <LinearGradient colors={['#ff4444', '#cc0000']} style={styles.actionGradiant}>
+                   <Ionicons name="remove-circle" size={20} color="#fff" />
+                   <Text style={[styles.actionBtnText, {color:'#fff'}]}> {t.penalize}</Text>
+                </LinearGradient>
+             </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </View>
+    );
+  };
+
+  const renderHistory = () => {
+
+    // ── Analytics computations ──
+    const totalGames = gameHistory.length;
+    const totalEarnings = gameHistory.reduce((sum, g) => sum + (g.totalPot || 0), 0);
+    const hostCommission = gameHistory.reduce((sum, g) => sum + (g.prizeKotariw ?? ((g.totalPot || 0) * 0.20)), 0);
+    const avgPot = totalGames > 0 ? (totalEarnings / totalGames).toFixed(0) : 0;
+
+    // Last 8 matches for bar chart (oldest → newest)
+    const chartData = [...gameHistory].reverse().slice(-8);
+    const maxPot = chartData.reduce((m, g) => Math.max(m, g.totalPot || 0), 1);
+
+    return (
+      <View style={styles.gameContainer}>
+        <View style={styles.headerContainer}>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <TouchableOpacity onPress={() => setCurrentScreen('HOME')} style={{marginRight: 15}}>
+              <Ionicons name="arrow-back" size={28} color="#fff" />
             </TouchableOpacity>
-          ))}
+            <Text style={{fontSize: 22, color: '#fff', fontWeight: 'bold'}}>{t.gameHistory}</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.clearHistoryBtn} 
+            onPress={() => {
+              Alert.alert(
+                "Clear History",
+                "Are you sure you want to clear all history records?",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Clear",
+                    style: "destructive",
+                    onPress: async () => {
+                      setGameHistory([]);
+                      await AsyncStorage.removeItem('kotariw_history');
+                    }
+                  }
+                ]
+              );
+            }}
+          >
+            <Ionicons name="trash-outline" size={20} color="#ff4444" />
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.actionRow}>
-           <TouchableOpacity style={[styles.actionBtn, styles.addBtn]} onPress={() => sendAction('add')}>
-              <Text style={styles.actionBtnText}>Add ➕</Text>
-           </TouchableOpacity>
-           <TouchableOpacity style={[styles.actionBtn, styles.subBtn]} onPress={() => sendAction('subtract')}>
-              <Text style={styles.actionBtnText}>Penalize ➖</Text>
-           </TouchableOpacity>
+        {/* Tab bar */}
+        <View style={styles.historyTabBar}>
+          <TouchableOpacity
+            style={[styles.historyTabBtn, historyTab === 'matches' && styles.historyTabBtnActive]}
+            onPress={() => { triggerHaptic('light'); setHistoryTab('matches'); }}
+          >
+            <Ionicons name="list" size={16} color={historyTab === 'matches' ? '#111' : '#aab'} />
+            <Text style={[styles.historyTabText, historyTab === 'matches' && { color: '#111' }]}>{t.matchesTab}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.historyTabBtn, historyTab === 'analytics' && styles.historyTabBtnActive]}
+            onPress={() => { triggerHaptic('light'); setHistoryTab('analytics'); }}
+          >
+            <Ionicons name="bar-chart" size={16} color={historyTab === 'analytics' ? '#111' : '#aab'} />
+            <Text style={[styles.historyTabText, historyTab === 'analytics' && { color: '#111' }]}>{t.analyticsTab}</Text>
+          </TouchableOpacity>
         </View>
+
+        {historyTab === 'matches' ? (
+          gameHistory.length === 0 ? (
+            <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20}}>
+              <Ionicons name="document-text-outline" size={80} color="#445" />
+              <Text style={{color: '#889', fontSize: 16, marginTop: 15, textAlign: 'center'}}>
+                {t.noHistory}
+              </Text>
+            </View>
+          ) : (
+            <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 15}} showsVerticalScrollIndicator={true}>
+              {gameHistory.map((game) => (
+                <LinearGradient key={game.id} colors={['#2a2a3e', '#1a1a2e']} style={styles.historyCard}>
+                  <View style={styles.historyHeader}>
+                    <View>
+                      <Text style={styles.historyDate}>{game.date} | {game.startTime} - {game.endTime}</Text>
+                      <Text style={styles.historyOpText}>{t.operator}: {game.operator}</Text>
+                    </View>
+                    <View style={styles.historyTableBadge}>
+                      <Text style={styles.historyTableText}>Table {game.table}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.historyDivider} />
+                  
+                  <View style={styles.historyWinnerRow}>
+                    <Text style={styles.historyWinnerLabel}>{t.winner}:</Text>
+                    <Text style={styles.historyWinnerName}>{game.winnerId} ({game.winnerScore} pts)</Text>
+                  </View>
+
+                  <View style={styles.historyPlayersList}>
+                    {game.players.map((p, idx) => {
+                      const isWinner = p.name.toLowerCase() === game.winnerId.toLowerCase();
+                      return (
+                        <View key={idx} style={styles.historyPlayerScoreRow}>
+                          <Text style={[styles.historyPlayerNameText, isWinner && {color: '#ffcc00', fontWeight: 'bold'}]}>
+                            {p.name} {isWinner && '👑'}
+                          </Text>
+                          <Text style={styles.historyPlayerScoreText}>
+                            Score: {p.score} | Bet: {p.bet} Birr
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  <View style={{flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, paddingHorizontal: 5}}>
+                    <View>
+                      <Text style={{color: '#aab', fontSize: 11}}>🥇 {t.winnerShare} ({game.pctWinner ?? 80}%):</Text>
+                      <Text style={{color: '#fff', fontSize: 13, fontWeight: 'bold'}}>{(game.prizeWinner ?? (game.totalPot * 0.8)).toFixed(0)} Birr</Text>
+                    </View>
+                    {(game.pctTable > 0 || game.prizeTable > 0) && (
+                      <View>
+                        <Text style={{color: '#aab', fontSize: 11}}>🎱 {t.tableShare} ({game.pctTable ?? 0}%):</Text>
+                        <Text style={{color: '#fff', fontSize: 13, fontWeight: 'bold'}}>{(game.prizeTable ?? 0).toFixed(0)} Birr</Text>
+                      </View>
+                    )}
+                    <View>
+                      <Text style={{color: '#aab', fontSize: 11}}>🏠 {t.kotariwShare} ({game.pctKotariw ?? 20}%):</Text>
+                      <Text style={{color: '#00e676', fontSize: 13, fontWeight: 'bold'}}>{(game.prizeKotariw ?? (game.totalPot * 0.2)).toFixed(0)} Birr</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.historyDivider} />
+
+                  <View style={styles.historyFooter}>
+                    <Text style={styles.historyFooterPotLabel}>Total Pot:</Text>
+                    <Text style={styles.historyFooterPotValue}>{game.totalPot} Birr</Text>
+                  </View>
+                </LinearGradient>
+              ))}
+            </ScrollView>
+          )
+        ) : (
+          /* ── ANALYTICS TAB ── */
+          <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 15}}>
+            {gameHistory.length === 0 ? (
+              <View style={{justifyContent: 'center', alignItems: 'center', padding: 40}}>
+                <Ionicons name="bar-chart-outline" size={80} color="#445" />
+                <Text style={{color: '#889', fontSize: 16, marginTop: 15, textAlign: 'center'}}>{t.noAnalyticsData}</Text>
+              </View>
+            ) : (
+              <>
+                {/* KPI cards */}
+                <View style={styles.analyticsKpiRow}>
+                  <LinearGradient colors={['#1a3a6b', '#0d1f3d']} style={styles.analyticsKpiCard}>
+                    <Ionicons name="game-controller" size={28} color="#00cfff" />
+                    <Text style={styles.analyticsKpiValue}>{totalGames}</Text>
+                    <Text style={styles.analyticsKpiLabel}>{t.totalGames}</Text>
+                  </LinearGradient>
+                  <LinearGradient colors={['#1a6b3a', '#0d3d1f']} style={styles.analyticsKpiCard}>
+                    <MaterialCommunityIcons name="poker-chip" size={28} color="#FFD700" />
+                    <Text style={styles.analyticsKpiValue}>{totalEarnings.toFixed(0)}</Text>
+                    <Text style={styles.analyticsKpiLabel}>{t.totalEarnings}</Text>
+                  </LinearGradient>
+                </View>
+                <View style={styles.analyticsKpiRow}>
+                  <LinearGradient colors={['#3d1a1a', '#2a0f0f']} style={styles.analyticsKpiCard}>
+                    <Ionicons name="home" size={28} color="#ff8a65" />
+                    <Text style={[styles.analyticsKpiValue, {color:'#ff8a65'}]}>{hostCommission.toFixed(0)}</Text>
+                    <Text style={styles.analyticsKpiLabel}>{t.hostCommission}</Text>
+                  </LinearGradient>
+                  <LinearGradient colors={['#3d3a1a', '#2a280f']} style={styles.analyticsKpiCard}>
+                    <Ionicons name="trending-up" size={28} color="#ffcc00" />
+                    <Text style={[styles.analyticsKpiValue, {color:'#ffcc00'}]}>{avgPot}</Text>
+                    <Text style={styles.analyticsKpiLabel}>{t.averagePot}</Text>
+                  </LinearGradient>
+                </View>
+
+                {/* Bar Chart */}
+                <LinearGradient colors={['#1e1e30', '#14142a']} style={styles.analyticsChartCard}>
+                  <Text style={styles.analyticsChartTitle}>{t.recentEarnings}</Text>
+                  <View style={styles.analyticsBarContainer}>
+                    {chartData.map((game, idx) => {
+                      const barHeightPct = ((game.totalPot || 0) / maxPot) * 100;
+                      const commission = (game.totalPot * 0.20).toFixed(0);
+                      return (
+                        <View key={game.id} style={styles.analyticsBarCol}>
+                          <Text style={styles.analyticsBarValue}>{(game.totalPot || 0).toFixed(0)}</Text>
+                          <View style={styles.analyticsBarTrack}>
+                            <LinearGradient
+                              colors={['#00e676', '#007a3d']}
+                              style={[styles.analyticsBarFill, { height: `${barHeightPct}%` }]}
+                            />
+                          </View>
+                          <View style={styles.analyticsCommissionDot}>
+                            <Text style={styles.analyticsCommissionText}>{commission}</Text>
+                          </View>
+                          <Text style={styles.analyticsBarLabel} numberOfLines={1}>
+                            {(idx + 1)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                  <View style={styles.analyticsLegend}>
+                    <View style={[styles.analyticsLegendDot, {backgroundColor:'#00e676'}]} />
+                    <Text style={styles.analyticsLegendText}>Pot   </Text>
+                    <View style={[styles.analyticsLegendDot, {backgroundColor:'#ff8a65'}]} />
+                    <Text style={styles.analyticsLegendText}>Commission (below bar)</Text>
+                  </View>
+                </LinearGradient>
+              </>
+            )}
+          </ScrollView>
+        )}
       </View>
     );
   };
 
   return (
-    <View style={{flex:1}}>
+    <View style={{flex:1, backgroundColor:'#000'}}>
       {currentScreen === 'HOME' && renderHome()}
-      {currentScreen === 'SETUP' && renderSetup()}
       {currentScreen === 'GAME' && renderGame()}
+      {currentScreen === 'HISTORY' && renderHistory()}
+      {renderMenuModal()}
+      {renderKotariwDashboardModal()}
+      {renderOperatorModal()}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1e1e1e', alignItems: 'center', paddingTop: 60, paddingHorizontal: 15 },
-  homeBackground: { flex: 1, resizeMode: 'cover', justifyContent: 'center', alignItems: 'center' },
-  homeOverlay: { backgroundColor: 'rgba(0,0,0,0.65)', padding: 40, borderRadius: 20, alignItems: 'center', width: '90%' },
-  titleLogo: { fontSize: 44, fontWeight: '900', color: '#00ff88', fontStyle: 'italic', textShadowColor: '#000', textShadowOffset: {width: 2, height: 2}, textShadowRadius: 10 },
-  subtitleLogo: { fontSize: 18, color: '#fff', letterSpacing: 5, marginBottom: 60 },
-  playButton: { backgroundColor: '#ffcc00', paddingVertical: 18, paddingHorizontal: 55, borderRadius: 40, elevation: 5 },
-  playButtonText: { fontSize: 24, fontWeight: 'bold', color: '#111' },
-  title: { fontSize: 28, color: '#fff', fontWeight: 'bold', marginBottom: 20 },
-  setupCard: { backgroundColor: '#2a2a2a', width: '100%', padding: 20, borderRadius: 15, marginBottom: 20 },
-  label: { color: '#ccc', fontSize: 16, marginBottom: 12 },
-  buttonGroup: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
-  countButton: { backgroundColor: '#333', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 10 },
-  activeButton: { backgroundColor: '#00ff88' },
+  fullScreenBg: { flex: 1, resizeMode: 'cover' },
+  bgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5, 5, 20, 0.45)' },
+  bgOverlayHeavy: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5, 5, 20, 0.85)' },
+  gameContainer: { flex: 1, backgroundColor: '#0f0f1c' },
+  gameScrollContent: { flexGrow: 1, paddingBottom: 30 },
+  
+  // Language button
+  langBtn: { marginRight: 8, padding: 7, backgroundColor: 'rgba(20,20,40,0.8)', borderRadius: 16, borderWidth: 1, borderColor: '#445', justifyContent: 'center', alignItems: 'center', minWidth: 36 },
+  langBtnText: { color: '#ffcc00', fontWeight: 'bold', fontSize: 12 },
+
+  // Header
+  headerContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 15, paddingTop: 50, paddingBottom: 10, backgroundColor: 'rgba(0,0,0,0.5)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)' },
+  quitBtnHeader: { marginRight: 8, padding: 5, backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255, 68, 68, 0.3)', justifyContent: 'center', alignItems: 'center' },
+  profileBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(20,20,40,0.8)', paddingRight: 15, borderRadius: 30, borderWidth: 1, borderColor: '#445' },
+  profileTextWrap: { marginLeft: 8 },
+  profileName: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  levelWrap: { backgroundColor: '#ffcc00', paddingHorizontal: 6, borderRadius: 5, alignSelf: 'flex-start', marginTop: 2 },
+  levelText: { color: '#000', fontSize: 9, fontWeight: 'bold' },
+  headerRightWrap: { flexDirection: 'row', alignItems: 'center' },
+  historyBtn: { marginRight: 15, padding: 5, backgroundColor: 'rgba(20,20,40,0.8)', borderRadius: 20, borderWidth: 1, borderColor: '#445' },
+  walletContainer: { justifyContent: 'center' },
+  walletBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  walletText: { color: '#000', fontWeight: 'bold', fontSize: 16, marginHorizontal: 8 },
+
+  // Home Screen Layout
+  homeScrollContent: { flexGrow: 1 },
+  homeContent: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 20 },
+  cardsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%', paddingHorizontal: 10, marginVertical: 20 },
+  sideCard: { width: 100, height: 160, borderRadius: 15, overflow: 'hidden', elevation: 10, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10 },
+  centerCard: { width: 150, height: 220, borderRadius: 20, overflow: 'hidden', marginHorizontal: 15, zIndex: 10, elevation: 20, shadowColor: '#00ff88', shadowOpacity: 0.4, shadowRadius: 20 },
+  cardGradient: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 10 },
+  cardGradientCenter: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 10, borderWidth: 2, borderColor: '#00ff88', borderRadius: 20 },
+  centerIconWrap: { marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.8, shadowRadius: 10, elevation: 5 },
+  cardTitle: { color: '#fff', fontSize: 14, fontWeight: '900', marginTop: 15, textAlign: 'center' },
+  cardTitleExtra: { color: '#fff', fontSize: 22, fontWeight: '900', textAlign: 'center', textShadowColor: '#000', textShadowRadius: 5 },
+
+  // Dashboard / Session Stats
+  dashboardContainer: { width: '90%', marginTop: 10 },
+  dashboardGradient: { padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#334', elevation: 10 },
+  dashboardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dashboardTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  dashboardDate: { color: '#889', fontSize: 12 },
+  dashboardDivider: { height: 1, backgroundColor: '#334', marginVertical: 12 },
+  dashboardRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  dashboardCol: { flex: 1, alignItems: 'center' },
+  dashboardLabel: { color: '#889', fontSize: 11, fontWeight: 'bold', marginBottom: 5 },
+  dashboardValue: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
+  dashboardSubLabel: { color: '#889', fontSize: 12, marginBottom: 5 },
+  sessionInput: { backgroundColor: 'rgba(0,0,0,0.3)', color: '#fff', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#334', fontSize: 14, textAlign: 'center' },
+
+  // Setup / Store Modals
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '90%', maxHeight: '85%', borderRadius: 20, overflow: 'hidden', elevation: 20 },
+  modalContentSmall: { width: '80%', borderRadius: 20, overflow: 'hidden', elevation: 20 },
+  modalDarkGradient: { padding: 25 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#334', paddingBottom: 15 },
+  modalTitle: { fontSize: 24, color: '#fff', fontWeight: 'bold' },
+  label: { color: '#aab', fontSize: 14, marginBottom: 10, fontWeight: 'bold' },
+  buttonGroup: { flexDirection: 'row', justifyContent: 'space-between' },
+  countButton: { paddingVertical: 12, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#445' },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   activeButtonText: { color: '#111' },
-  playerSetupRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
-  nameInput: { flex: 2, backgroundColor: '#111', color: '#00ff88', padding: 14, borderRadius: 10, marginRight: 10, fontSize: 16 },
-  betInput: { flex: 1, backgroundColor: '#111', color: '#ffcc00', padding: 14, borderRadius: 10, fontSize: 16, textAlign: 'center' },
-  currencyTag: { color: '#888', marginLeft: 8, fontSize: 14 },
-  startButton: { backgroundColor: '#ffcc00', paddingVertical: 18, width: '100%', borderRadius: 12, alignItems: 'center' },
-  startButtonText: { color: '#111', fontSize: 22, fontWeight: 'bold' },
-  infoText: { color: '#00ff88', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
-  potText: { color: '#ffcc00', fontSize: 18, marginBottom: 20 },
-  scoresWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, width: '100%', marginBottom: 30 },
-  playerCard: { backgroundColor: '#333', padding: 12, borderRadius: 12, alignItems: 'center', width: '45%' },
-  activePlayerCard: { borderColor: '#00ff88', borderWidth: 2, backgroundColor: '#224422' },
-  playerName: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  playerScore: { color: '#00ff88', fontSize: 28, fontWeight: 'bold', marginTop: 5 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: '100%', rowGap: 12, columnGap: 12 },
-  ballButton: { width: 55, height: 55, borderRadius: 27.5, backgroundColor: '#222', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#555' },
-  selectedBall: { borderColor: '#00ff88', backgroundColor: '#333' },
-  ballText: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
-  actionRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 30 },
-  actionBtn: { flex: 1, paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginHorizontal: 10 },
-  addBtn: { backgroundColor: '#00ff88' },
-  subBtn: { backgroundColor: '#ff4444' },
-  actionBtnText: { fontSize: 18, fontWeight: 'bold', color: '#111' },
-  winnerContainer: { flex: 1, backgroundColor: '#1e1e1e', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  winnerText: { fontSize: 40, color: '#00ff88', fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
-  scoreText: { fontSize: 24, color: '#fff', marginBottom: 40 },
-  financialCard: { backgroundColor: '#2a2a2a', width: '100%', padding: 25, borderRadius: 15, marginBottom: 40 },
-  financialTitle: { color: '#ffcc00', fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  financialText: { color: '#fff', fontSize: 18, marginBottom: 10 },
-  divider: { height: 1, backgroundColor: '#555', marginVertical: 15 }
+  
+  // Player Setup Row & Custom Pick Button
+  playerSetupRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, alignItems: 'center' },
+  nameInputWrapper: { flex: 1.5, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10, alignItems: 'center', marginRight: 10, borderWidth: 1, borderColor: '#334' },
+  modalInputNameWithBtn: { flex: 1, color: '#00e676', padding: 14, fontSize: 16 },
+  frequentPlayerBtn: { padding: 10, justifyContent: 'center', alignItems: 'center' },
+  
+  betInputWrapper: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10, alignItems: 'center', paddingRight: 10, borderWidth: 1, borderColor: '#334' },
+  modalInputBet: { flex: 1, color: '#ffcc00', padding: 14, fontSize: 16, textAlign: 'center' },
+  currTag: { color: '#889', fontSize: 12, fontWeight: 'bold' },
+  startBtnOuter: { marginTop: 25, borderRadius: 15, overflow: 'hidden' },
+  startBtnInner: { paddingVertical: 18, alignItems: 'center' },
+  startBtnText: { color: '#111', fontSize: 20, fontWeight: '900', letterSpacing: 1 },
+  storeBtnInner: { paddingVertical: 18, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', borderRadius: 15, elevation: 5 },
+  storeBtnText: { color: '#111', fontSize: 18, fontWeight: 'bold', marginLeft: 10 },
+
+  // Player Picker Modal
+  playerPickRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#334' },
+  playerPickText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+  // Game View
+  gameInfoBox: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#1a1a2e' },
+  turnText: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  potText: { color: '#ffcc00', fontSize: 16, marginTop: 5, fontWeight: '600' },
+  scoresWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, padding: 15 },
+  playerCard: { padding: 15, borderRadius: 15, alignItems: 'center', width: '45%', borderWidth: 1, borderColor: '#334', elevation: 5 },
+  cardActiveGlow: { shadowColor: '#00e676', shadowOpacity: 0.8, shadowRadius: 10, elevation: 10, transform: [{scale: 1.05}] },
+  playerName: { color: '#aab', fontSize: 15, fontWeight: 'bold' },
+  playerScore: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginTop: 5 },
+  miniBall: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 2,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 1,
+  },
+  miniBallStripe: {
+    position: 'absolute',
+    width: '100%',
+    height: 8,
+    zIndex: 1,
+  },
+  miniBallInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  miniBallText: {
+    color: '#000',
+    fontSize: 6.5,
+    fontWeight: 'bold',
+  },
+  miniBallsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginTop: 8,
+    maxWidth: '100%',
+  },
+  // ── Pool Table ──
+  poolTableWrapper: { marginHorizontal: 12, marginTop: 10 },
+  poolTableOuter: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 12,
+    borderColor: '#5c3a1e',
+    elevation: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  poolTableFelt: {
+    height: 280,
+    position: 'relative',
+  },
+  pocketDot: {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#111',
+  },
+  // Each ball's absolute-positioned touch target
+  tableBallTouch: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    marginLeft: -22,
+    marginTop: -22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  // The round ball itself
+  tableBall: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tableBallSolid: {
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    borderWidth: 2,
+  },
+  // Stripe band across the middle of a stripe ball
+  tableBallStripeBand: {
+    position: 'absolute',
+    width: '100%',
+    height: 15,
+    top: '50%',
+    marginTop: -7.5,
+    zIndex: 1,
+  },
+  // Small white circle that holds the number
+  tableBallDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+    elevation: 2,
+  },
+  tableBallNumText: {
+    color: '#111',
+    fontSize: 9,
+    fontWeight: '900',
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+    lineHeight: 11,
+  },
+  // Small top-left glare to give 3D sphere effect
+  tableBallGlare: {
+    position: 'absolute',
+    width: 12,
+    height: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+    top: 5,
+    left: 6,
+    zIndex: 3,
+    transform: [{ rotate: '-30deg' }],
+  },
+  tableBallGlow: {
+    position: 'absolute',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2.5,
+    borderColor: '#ffcc00',
+    backgroundColor: 'rgba(255, 204, 0, 0.20)',
+    zIndex: 0,
+  },
+  tableBallHint: {
+    color: '#889',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+    fontStyle: 'italic',
+  },
+  actionRow: { flexDirection: 'row', padding: 20, paddingBottom: 40, marginTop: 'auto' },
+  actionGradiant: { flexDirection: 'row', paddingVertical: 16, borderRadius: 15, justifyContent: 'center', alignItems: 'center', elevation: 5 },
+  actionBtnText: { fontSize: 16, fontWeight: 'bold', color: '#111' },
+
+  // Winner View
+  winnerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  winnerText: { fontSize: 44, color: '#ffcc00', fontWeight: '900', marginTop: 20, textShadowColor: '#000', textShadowRadius: 10 },
+  finalScoreText: { fontSize: 20, color: '#fff', marginBottom: 40, fontWeight: 'bold' },
+  financialCard: { width: '100%', padding: 25, borderRadius: 20, elevation: 15, borderWidth: 1, borderColor: '#445' },
+  financialTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginBottom: 15, letterSpacing: 2 },
+  finDivider: { height: 1, backgroundColor: '#445', marginBottom: 15 },
+  finRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  finLabel: { color: '#aab', fontSize: 16 },
+  finValue: { color: '#00e676', fontSize: 18, fontWeight: 'bold' },
+  returnBtn: { paddingVertical: 15, paddingHorizontal: 40, borderRadius: 25, elevation: 5 },
+  returnBtnText: { color: '#111', fontSize: 18, fontWeight: 'bold' },
+
+  // History Screen Styles
+  clearHistoryBtn: { padding: 8, backgroundColor: 'rgba(255, 68, 68, 0.1)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255, 68, 68, 0.3)' },
+  historyCard: { padding: 15, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#334', elevation: 5 },
+  historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyDate: { color: '#aab', fontSize: 12, fontWeight: '600' },
+  historyOpText: { color: '#667', fontSize: 11, marginTop: 2 },
+  historyTableBadge: { backgroundColor: '#ffcc00', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  historyTableText: { color: '#000', fontSize: 11, fontWeight: 'bold' },
+  historyDivider: { height: 1, backgroundColor: '#334', marginVertical: 10 },
+  historyWinnerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  historyWinnerLabel: { color: '#889', fontSize: 14, marginRight: 5 },
+  historyWinnerName: { color: '#ffcc00', fontSize: 15, fontWeight: 'bold' },
+  historyPlayersList: { paddingLeft: 10 },
+  historyPlayerScoreRow: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 3 },
+  historyPlayerNameText: { color: '#fff', fontSize: 13 },
+  historyPlayerScoreText: { color: '#889', fontSize: 12 },
+  historyFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyFooterPotLabel: { color: '#aab', fontSize: 14, fontWeight: 'bold' },
+  historyFooterPotValue: { color: '#00e676', fontSize: 16, fontWeight: 'bold' },
+
+  // ---- NEW HOME UI ----
+  homeTopBar: { position: 'absolute', top: 50, left: 15, right: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', zIndex: 10 },
+  menuBtn: { backgroundColor: 'rgba(0,0,0,0.55)', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: '#fff' },
+  menuModalContent: { width: '80%', borderRadius: 20, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)' },
+  menuOptionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
+  menuOptionText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 15 },
+  dashboardInputRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 10, marginBottom: 15, borderWidth: 1, borderColor: '#334' },
+  dashboardInputLabel: { color: '#aab', fontSize: 14, fontWeight: 'bold', flex: 2 },
+  dashboardInput: { color: '#ffcc00', fontSize: 18, fontWeight: 'bold', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 15, minWidth: 70, borderWidth: 1, borderColor: '#445' },
+  dashboardPctSign: { color: '#889', fontSize: 16, fontWeight: 'bold', marginLeft: 8 },
+  dashboardValidationContainer: { alignItems: 'center', marginVertical: 15, padding: 12, borderRadius: 12 },
+  dashboardValidationText: { fontSize: 14, fontWeight: 'bold' },
+  homeCoinPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#FFD700', marginRight: 8 },
+  homeCoinText: { color: '#FFD700', fontWeight: 'bold', fontSize: 16, marginRight: 6 },
+  homeGemBtn: { backgroundColor: 'rgba(0,0,0,0.55)', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: '#00cfff' },
+
+  // Logo
+  logoArea: { alignItems: 'center', marginTop: 70, marginBottom: 10 },
+  logoRow: { flexDirection: 'row', alignItems: 'center' },
+  logoBall: { width: 52, height: 52, borderRadius: 26, justifyContent: 'center', alignItems: 'center', marginRight: 6, borderWidth: 3, borderColor: '#ff8800' },
+  logoBallText: { color: '#fff', fontSize: 22, fontWeight: '900' },
+  logoText: { fontSize: 38, fontWeight: '900', color: '#4fc3f7', letterSpacing: 2, textShadowColor: '#000', textShadowOffset: { width: 2, height: 2 }, textShadowRadius: 6 },
+  flameBar: { height: 3, width: 220, backgroundColor: '#ff8800', borderRadius: 2, marginTop: 4, opacity: 0.7 },
+
+  // Two main cards
+  mainCardsRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 16, marginBottom: 12 },
+  mainCard: { borderRadius: 22, padding: 20, alignItems: 'center', justifyContent: 'center', minHeight: 180, borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)', elevation: 12, shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 10 },
+  mainCardIconCircle: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 12, borderWidth: 3, borderColor: 'rgba(255,255,255,0.3)' },
+  mainCardBallNum: { color: '#fff', fontSize: 36, fontWeight: '900' },
+  mainCardTitle: { color: '#fff', fontSize: 18, fontWeight: '900', textAlign: 'center', letterSpacing: 1 },
+  mainCardSub: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 'bold', marginTop: 4, letterSpacing: 2 },
+
+  // Daily top players
+  dailySection: { marginHorizontal: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 18, padding: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  dailyTitle: { color: '#ccc', fontSize: 11, fontWeight: 'bold', letterSpacing: 3, textAlign: 'center', marginBottom: 10 },
+  dailyEmpty: { color: '#667', fontSize: 13, textAlign: 'center', marginVertical: 8 },
+  dailyRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  dailyRank: { fontSize: 20, marginRight: 8, width: 28 },
+  dailyAvatar: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#334', justifyContent: 'center', alignItems: 'center', marginRight: 10, borderWidth: 1, borderColor: '#556' },
+  dailyName: { flex: 1, color: '#ddd', fontSize: 14, fontWeight: '600' },
+  dailyScore: { color: '#FFD700', fontSize: 16, fontWeight: 'bold' },
+
+  // Session inline
+  sessionRowInline: { flexDirection: 'row', marginTop: 12 },
+  sessionInputSmall: { flex: 1, backgroundColor: 'rgba(255,255,255,0.08)', color: '#fff', padding: 8, borderRadius: 10, borderWidth: 1, borderColor: '#334', fontSize: 13, textAlign: 'center' },
+  sessionStatsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  sessionStatText: { color: '#889', fontSize: 13 },
+
+  // ── History Tabs ──
+  historyTabBar: {
+    flexDirection: 'row',
+    marginHorizontal: 15,
+    marginVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 14,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#334',
+  },
+  historyTabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderRadius: 10,
+    gap: 6,
+  },
+  historyTabBtnActive: {
+    backgroundColor: '#00e676',
+  },
+  historyTabText: {
+    color: '#aab',
+    fontSize: 13,
+    fontWeight: 'bold',
+  },
+
+  // ── Analytics ──
+  analyticsKpiRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  analyticsKpiCard: {
+    flex: 1,
+    borderRadius: 16,
+    padding: 18,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    elevation: 6,
+  },
+  analyticsKpiValue: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '900',
+    marginTop: 6,
+  },
+  analyticsKpiLabel: {
+    color: '#889',
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  analyticsChartCard: {
+    borderRadius: 18,
+    padding: 18,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#334',
+    elevation: 8,
+  },
+  analyticsChartTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginBottom: 16,
+  },
+  analyticsBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    height: 130,
+    gap: 6,
+  },
+  analyticsBarCol: {
+    flex: 1,
+    alignItems: 'center',
+    height: '100%',
+    justifyContent: 'flex-end',
+  },
+  analyticsBarValue: {
+    color: '#aab',
+    fontSize: 8,
+    marginBottom: 2,
+  },
+  analyticsBarTrack: {
+    width: '80%',
+    height: '85%',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 6,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
+  analyticsBarFill: {
+    width: '100%',
+    borderRadius: 6,
+  },
+  analyticsCommissionDot: {
+    backgroundColor: 'rgba(255,138,101,0.2)',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+    marginTop: 2,
+  },
+  analyticsCommissionText: {
+    color: '#ff8a65',
+    fontSize: 7,
+    fontWeight: 'bold',
+  },
+  analyticsBarLabel: {
+    color: '#667',
+    fontSize: 9,
+    marginTop: 3,
+  },
+  analyticsLegend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  analyticsLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 4,
+  },
+  analyticsLegendText: {
+    color: '#889',
+    fontSize: 11,
+    marginRight: 10,
+  },
+
+  // ── Coin Store Styles ──
+  storeSubtitle: {
+    color: '#aab',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  packageCard: {
+    marginBottom: 12,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#334',
+  },
+  packageCardPopular: {
+    borderColor: '#ffcc00',
+    borderWidth: 2,
+    transform: [{ scale: 1.01 }],
+  },
+  packageCardGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  packageIconWrap: {
+    marginRight: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  packageTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  packagePrice: {
+    color: '#889',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  popularBadge: {
+    backgroundColor: '#ffcc00',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    marginRight: 10,
+  },
+  popularBadgeText: {
+    color: '#000',
+    fontSize: 9,
+    fontWeight: 'bold',
+  },
+  instructionContainer: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#334',
+    marginBottom: 15,
+  },
+  instructionText: {
+    color: '#ddd',
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  settingsLabel: {
+    color: '#aab',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  settingsInput: {
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    color: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334',
+    fontSize: 14,
+  },
 });
