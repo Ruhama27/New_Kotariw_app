@@ -138,6 +138,19 @@ export const translations = {
     confirmDeleteOp: 'Delete this operator profile?',
     shiftActive: 'Shift Active',
     shiftNotStarted: 'No active shift',
+    // Neon Scorer additions
+    yourTurn: 'YOUR TURN',
+    waitingTurn: 'WAITING',
+    ballsRemaining: 'BALLS REMAINING',
+    point: 'POINT',
+    passTurn: 'PASS TURN',
+    ballsSunk: 'BALLS SUNK',
+    cueBallReady: 'Ready',
+    allBallsOnTable: 'All balls on table',
+    gameTab: 'Game',
+    historyNavTab: 'History',
+    statsNavTab: 'Stats',
+    settingsNavTab: 'Settings',
   },
   am: {
     // Home
@@ -278,5 +291,18 @@ export const translations = {
     confirmDeleteOp: 'ይህን የኦፕሬተር መገለጫ ይሰርዙ?',
     shiftActive: 'ሺፍት ንቁ ነው',
     shiftNotStarted: 'ንቁ ሺፍት የለም',
+    // Neon Scorer additions
+    yourTurn: 'የእርስዎ ተራ',
+    waitingTurn: 'ተጠባባቂ',
+    ballsRemaining: 'የቀሩት ኳሶች',
+    point: 'ነጥብ',
+    passTurn: 'ተራ ማስተላለፍ',
+    ballsSunk: 'የገቡ ኳሶች',
+    cueBallReady: 'ዝግጁ',
+    allBallsOnTable: 'ሁሉም ኳሶች ጠረጴዛ ላይ ናቸው',
+    gameTab: 'ጨዋታ',
+    historyNavTab: 'ታሪክ',
+    statsNavTab: 'ስታቲስቲክስ',
+    settingsNavTab: 'ቅንብሮች',
   }
 };

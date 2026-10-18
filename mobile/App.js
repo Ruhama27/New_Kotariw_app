@@ -493,6 +493,18 @@ export default function App() {
     }
   };
 
+  const handlePassTurn = () => {
+    if (!gameEngine) return;
+    triggerHaptic('light');
+    try {
+      gameEngine.nextTurn();
+      setStatus({ ...gameEngine.getStatus() });
+      setSelectedBall(null);
+    } catch (e) {
+      console.warn('Could not pass turn:', e);
+    }
+  };
+
   const handleGameFinished = async (winnerData) => {
     setWinner(winnerData);
     playSound('winner');
@@ -580,18 +592,20 @@ export default function App() {
     <View style={styles.headerContainer}>
       <View style={{flexDirection: 'row', alignItems: 'center'}}>
         <TouchableOpacity style={styles.quitBtnHeader} onPress={handleQuitGame}>
-          <Ionicons name="exit" size={22} color="#ff4444" />
+          <Ionicons name="arrow-back" size={20} color="#ff6b6b" />
         </TouchableOpacity>
-        <View style={styles.profileBadge}>
-          <Ionicons name="person-circle" size={40} color="#fff" />
-          <View style={styles.profileTextWrap}>
-            <Text style={styles.profileName}>Guest User</Text>
-            <View style={styles.levelWrap}>
-              <Text style={styles.levelText}>LVL 12</Text>
-            </View>
-          </View>
+        <View style={styles.tableBadge}>
+          <Text style={styles.tableBadgeText}>TABLE {tableNumber}</Text>
         </View>
       </View>
+
+      <View style={styles.headerCenterWrap}>
+        <Text style={styles.headerNeonTitle}>POOL SCORER</Text>
+        <View style={styles.potPillBadge}>
+          <Text style={styles.potPillText}>POT: {status ? status.total_pot : 0} Birr</Text>
+        </View>
+      </View>
+
       <View style={styles.headerRightWrap}>
         <TouchableOpacity style={styles.langBtn} onPress={toggleLang}>
           <Text style={styles.langBtnText}>{t.language}</Text>
@@ -599,21 +613,13 @@ export default function App() {
         <TouchableOpacity style={styles.langBtn} onPress={toggleSound}>
           <Ionicons name={soundOn ? 'volume-high' : 'volume-mute'} size={18} color={soundOn ? '#00e676' : '#666'} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.historyBtn} onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}>
-          <Ionicons name="menu" size={24} color="#00e676" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.walletContainer} onPress={() => setStoreVisible(true)}>
-          <LinearGradient colors={['#ffd700', '#daa520']} style={styles.walletBtn}>
-             <MaterialCommunityIcons name="poker-chip" size={18} color="#000" />
-             <Text style={styles.walletText}>{coins !== null ? coins : '...'}</Text>
-             <Ionicons name="add-circle" size={20} color="#000" />
-          </LinearGradient>
+        <TouchableOpacity style={styles.gearBtn} onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}>
+          <Ionicons name="settings-sharp" size={18} color="#00f2fe" />
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  
   // ── OPERATOR PROFILE HELPERS ──────────────────────────────────────────
   const saveOperatorProfiles = async (profiles) => {
     setOperatorProfiles(profiles);
@@ -1444,7 +1450,7 @@ const renderStore = () => {
              <Text style={styles.winnerText}>{winner.winner_id} {t.wins}</Text>
              <Text style={styles.finalScoreText}>{t.score}: {winner.winner_score}</Text>
              
-<LinearGradient colors={['#2a2a3e', '#1a1a2e']} style={styles.financialCard}>
+              <LinearGradient colors={['#2a2a3e', '#1a1a2e']} style={styles.financialCard}>
                 <Text style={styles.financialTitle}>{t.matchResults}</Text>
                 <View style={styles.finDivider} />
                 
@@ -1481,6 +1487,10 @@ const renderStore = () => {
        );
     }
 
+    const remainingCount = status.remaining_numbers ? status.remaining_numbers.length : 0;
+    const playerKeys = Object.keys(status.players);
+    const isTwoPlayer = playerKeys.length === 2;
+
     return (
       <View style={styles.gameContainer}>
         {renderGameHeader()}
@@ -1488,60 +1498,94 @@ const renderStore = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.gameScrollContent}
         >
-          <View style={styles.gameInfoBox}>
-             <Text style={styles.turnText}>{t.turn}: <Text style={{color: '#00e676'}}>{status.current_player}</Text></Text>
-             <Text style={styles.potText}>{t.pot}: {status.total_pot} Birr | Table {tableNumber}</Text>
-          </View>
-          
+          {/* ── PLAYER SCORE CARDS (Image 2 + Image 1 Neon Cards) ── */}
           <View style={styles.scoresWrap}>
-            {Object.keys(status.players).map((key, i) => {
+            {playerKeys.map((key, i) => {
               const p = Array.isArray(status.players) ? status.players[i] : status.players[key];
               const pId = Array.isArray(status.players) ? p.id : key;
               const pScore = Array.isArray(status.players) ? p.score : p.total_score;
               const isActive = status.current_player === pId;
 
               return (
-                <LinearGradient 
-                   key={pId}
-                   colors={isActive ? ['#00e676', '#004d26'] : ['#2a2a3e', '#1a1a2e']}
-                   style={[styles.playerCard, isActive && styles.cardActiveGlow]}
+                <View
+                  key={pId}
+                  style={[
+                    styles.playerNeonCard,
+                    isActive ? styles.playerNeonCardActive : styles.playerNeonCardInactive,
+                    isTwoPlayer ? { flex: 1, marginHorizontal: 5 } : { width: '48%', marginBottom: 10 }
+                  ]}
                 >
-                  <Text numberOfLines={1} style={[styles.playerName, isActive && {color:'#111'}]}>{pId}</Text>
-                  <Text style={[styles.playerScore, isActive && {color:'#fff'}]}>{pScore}</Text>
-                  
-                  {p.history && p.history.length > 0 && (
-                    <View style={styles.miniBallsRow}>
-                      {p.history.map((item, idx) => (
-                        <MiniatureBall key={idx} item={item} />
-                      ))}
+                  {/* Turn indicator badge */}
+                  <View style={isActive ? styles.turnBadgeActive : styles.turnBadgeInactive}>
+                    <Text style={isActive ? styles.turnBadgeActiveText : styles.turnBadgeInactiveText}>
+                      {isActive ? `● ${t.yourTurn || 'YOUR TURN'}` : (t.waitingTurn || 'WAITING')}
+                    </Text>
+                  </View>
+
+                  {/* Player identity row */}
+                  <View style={styles.playerCardHeader}>
+                    <View style={[styles.playerAvatarCircle, isActive && styles.playerAvatarCircleActive]}>
+                      <Text style={[styles.playerAvatarLetter, isActive && { color: '#00f2fe' }]}>
+                        {pId.charAt(0).toUpperCase()}
+                      </Text>
                     </View>
-                  )}
-                </LinearGradient>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.playerNameText, isActive ? styles.playerNameActive : styles.playerNameInactive]}
+                    >
+                      {pId.toUpperCase()}
+                    </Text>
+                  </View>
+
+                  {/* Digital Score */}
+                  <Text style={[styles.playerScoreDisplay, isActive ? styles.scoreActiveText : styles.scoreInactiveText]}>
+                    {pScore}
+                  </Text>
+
+                  {/* Pocketed Mini Balls */}
+                  <View style={styles.miniBallsRow}>
+                    {p.history && p.history.length > 0 ? (
+                      p.history.slice(-5).map((item, idx) => (
+                        <MiniatureBall key={idx} item={item} />
+                      ))
+                    ) : (
+                      <Text style={styles.noPocketedText}>- - -</Text>
+                    )}
+                  </View>
+                </View>
               );
             })}
           </View>
 
-          {/* ── 2D POOL TABLE ── */}
+          {/* ── 2D POOL TABLE (Image 2 Metallic Frame & Dispersed 3D Balls) ── */}
           <View style={styles.poolTableWrapper}>
             <View style={styles.poolTableOuter}>
-              {/* Felt surface */}
+              {/* Metallic corner pocket plates / trims */}
+              <View style={[styles.pocketChromePlate, styles.plateTopLeft]} />
+              <View style={[styles.pocketChromePlate, styles.plateTopRight]} />
+              <View style={[styles.pocketChromePlate, styles.plateBottomLeft]} />
+              <View style={[styles.pocketChromePlate, styles.plateBottomRight]} />
+              <View style={[styles.pocketChromePlateSide, styles.plateMidLeft]} />
+              <View style={[styles.pocketChromePlateSide, styles.plateMidRight]} />
+
+              {/* Tournament Felt Surface */}
               <LinearGradient
-                colors={['#1a5c2e', '#0e3d1f', '#1a5c2e']}
+                colors={['#0e4f27', '#083619', '#0e4f27']}
                 style={styles.poolTableFelt}
               >
-                {/* Rail markings (corner + side pockets) */}
+                {/* 6 Drop Pockets */}
                 {[
-                  { top: -8, left: -8 },
-                  { top: -8, right: -8 },
-                  { bottom: -8, left: -8 },
-                  { bottom: -8, right: -8 },
-                  { top: '50%', left: -8, marginTop: -8 },
-                  { top: '50%', right: -8, marginTop: -8 },
+                  { top: 2, left: 2 },
+                  { top: 2, right: 2 },
+                  { bottom: 2, left: 2 },
+                  { bottom: 2, right: 2 },
+                  { top: '50%', left: 2, marginTop: -10 },
+                  { top: '50%', right: 2, marginTop: -10 },
                 ].map((pos, i) => (
-                  <View key={i} style={[styles.pocketDot, pos]} />
+                  <View key={i} style={[styles.pocketDropHole, pos]} />
                 ))}
 
-                {/* Balls - perfectly dispersed across table with zero overlap (Image 2 style) */}
+                {/* 13 Realistic 3D Balls */}
                 {[
                   { num: 3,  top: '15%', left: '16%' },
                   { num: 4,  top: '38%', left: '14%' },
@@ -1586,43 +1630,35 @@ const renderStore = () => {
                       {/* 3D Realistic Billiard Ball matching Image 2 */}
                       <View style={styles.tableBall}>
                         {isStripe ? (
-                          /* STRIPED BALL (9 to 15): White base with wide 3D colored stripe */
                           <LinearGradient
                             colors={['#ffffff', '#f4f4f4', '#c9c9c9']}
                             start={{ x: 0.22, y: 0.12 }}
                             end={{ x: 0.85, y: 0.92 }}
                             style={styles.ballSphereBase}
                           >
-                            {/* Wide Middle Colored Stripe Band */}
                             <LinearGradient
                               colors={theme.gradient}
                               start={{ x: 0.22, y: 0.15 }}
                               end={{ x: 0.85, y: 0.90 }}
                               style={styles.tableBallStripeBand}
                             />
-                            {/* Specular gloss reflections */}
                             <View style={styles.tableBallGlare} />
                             <View style={styles.tableBallPinpoint} />
-                            {/* Center White Number Circle */}
                             <View style={styles.tableBallDot}>
                               <Text style={styles.tableBallNumText}>{num}</Text>
                               {theme.underline && <View style={styles.ballNumUnderline} />}
                             </View>
                           </LinearGradient>
                         ) : (
-                          /* SOLID BALL (1 to 8): 3D Sphere with Center White Number Circle */
                           <LinearGradient
                             colors={theme.gradient}
                             start={{ x: 0.22, y: 0.12 }}
                             end={{ x: 0.85, y: 0.92 }}
                             style={styles.ballSphereBase}
                           >
-                            {/* Specular gloss reflections */}
                             <View style={styles.tableBallGlare} />
                             <View style={styles.tableBallPinpoint} />
-                            {/* Subtle bottom rim reflection */}
                             <View style={styles.tableBallRim} />
-                            {/* Center White Number Circle */}
                             <View style={styles.tableBallDot}>
                               <Text style={styles.tableBallNumText}>{num}</Text>
                               {theme.underline && <View style={styles.ballNumUnderline} />}
@@ -1635,41 +1671,110 @@ const renderStore = () => {
                 })}
               </LinearGradient>
             </View>
+
+            {/* BALLS REMAINING PILL BADGE (Image 2 style) */}
+            <View style={styles.ballsRemainingContainer}>
+              <View style={styles.ballsRemainingPill}>
+                <Ionicons name="ellipse" size={8} color="#00f2fe" style={{ marginRight: 6 }} />
+                <Text style={styles.ballsRemainingText}>
+                  {t.ballsRemaining || 'BALLS REMAINING'}: <Text style={{ color: '#00f2fe', fontWeight: 'bold' }}>{remainingCount}</Text>
+                </Text>
+              </View>
+            </View>
+
+            {/* Ball Selection Alert Banner */}
             {selectedBall ? (
-              <Text style={styles.tableBallHint}>Ball <Text style={{ color: '#ffcc00', fontWeight: 'bold' }}>{selectedBall}</Text> selected — tap ADD or PENALIZE</Text>
+              <View style={styles.ballSelectedBanner}>
+                <Text style={styles.ballSelectedText}>
+                  Ball <Text style={{ color: '#ffcc00', fontWeight: '900' }}>{selectedBall}</Text> selected — Tap <Text style={{ color: '#00e676', fontWeight: 'bold' }}>+ {t.point || 'POINT'}</Text> or <Text style={{ color: '#ff3366', fontWeight: 'bold' }}>- {t.point || 'POINT'}</Text>
+                </Text>
+              </View>
             ) : (
-              <Text style={styles.tableBallHint}>Tap a ball on the table to select it</Text>
+              <Text style={styles.tableBallHint}>Tap a ball on the table to score or penalize</Text>
             )}
           </View>
 
-          <View style={styles.actionRow}>
-             <TouchableOpacity style={{flex:1.2, marginRight:6}} onPress={() => sendAction('add')}>
-                <LinearGradient colors={['#00e676', '#00aa55']} style={styles.actionGradiant}>
-                   <Ionicons name="add-circle" size={20} color="#111" />
-                   <Text style={styles.actionBtnText}> {t.add}</Text>
-                </LinearGradient>
-             </TouchableOpacity>
+          {/* ── BALLS SUNK / POCKETED CARD (Image 1 style) ── */}
+          <View style={styles.ballsSunkCard}>
+            <View style={styles.ballsSunkHeader}>
+              <Text style={styles.ballsSunkTitle}>{t.ballsSunk || 'BALLS SUNK'}</Text>
+              <View style={styles.cueBallBadge}>
+                <View style={styles.cueBallDot} />
+                <Text style={styles.cueBallText}>Cue Ball {t.cueBallReady || 'Ready'}</Text>
+              </View>
+            </View>
+            <View style={styles.ballsSunkList}>
+              {status.used_numbers && status.used_numbers.length > 0 ? (
+                status.used_numbers.map(num => (
+                  <View key={num} style={styles.sunkBallWrapper}>
+                    <MiniatureBall item={'+' + num} />
+                    <View style={styles.sunkCheckBadge}>
+                      <Ionicons name="checkmark" size={8} color="#fff" />
+                    </View>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.noSunkText}>{t.allBallsOnTable || 'All balls on table'}</Text>
+              )}
+            </View>
+          </View>
 
-             <TouchableOpacity 
-               style={{flex:1, marginHorizontal:4}} 
-               onPress={handleUndo}
-               disabled={!status.can_undo}
-             >
-                <LinearGradient 
-                  colors={status.can_undo ? ['#ffcc00', '#e6a800'] : ['#333', '#1e1e2d']} 
-                  style={styles.actionGradiant}
-                >
-                   <Ionicons name="arrow-undo" size={20} color={status.can_undo ? '#111' : '#666'} />
-                   <Text style={[styles.actionBtnText, {color: status.can_undo ? '#111' : '#666'}]}> {t.undo}</Text>
-                </LinearGradient>
-             </TouchableOpacity>
+          {/* ── PRIMARY NEON ACTION BUTTONS (Image 2 style) ── */}
+          <View style={styles.primaryActionRow}>
+            <TouchableOpacity
+              style={styles.neonBtnAdd}
+              onPress={() => sendAction('add')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={26} color="#00e676" />
+              <Text style={styles.neonBtnAddText}>+ {t.point || 'POINT'}</Text>
+            </TouchableOpacity>
 
-             <TouchableOpacity style={{flex:1.2, marginLeft:6}} onPress={() => sendAction('subtract')}>
-                <LinearGradient colors={['#ff4444', '#cc0000']} style={styles.actionGradiant}>
-                   <Ionicons name="remove-circle" size={20} color="#fff" />
-                   <Text style={[styles.actionBtnText, {color:'#fff'}]}> {t.penalize}</Text>
-                </LinearGradient>
-             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.neonBtnSubtract}
+              onPress={() => sendAction('subtract')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="remove" size={26} color="#ff3366" />
+              <Text style={styles.neonBtnSubtractText}>- {t.point || 'POINT'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── SECONDARY PILL CONTROLS (Image 2 style: UNDO, PASS TURN, QUIT) ── */}
+          <View style={styles.secondaryControlsRow}>
+            <TouchableOpacity
+              style={[styles.secPillBtn, !status.can_undo && styles.secPillBtnDisabled]}
+              onPress={handleUndo}
+              disabled={!status.can_undo}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-undo" size={15} color={status.can_undo ? '#ffcc00' : '#4b5563'} />
+              <Text style={[styles.secPillText, { color: status.can_undo ? '#ffcc00' : '#4b5563' }]}>
+                {' '}{t.undo || 'UNDO'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secPillBtn}
+              onPress={handlePassTurn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="swap-horizontal" size={15} color="#00f2fe" />
+              <Text style={[styles.secPillText, { color: '#00f2fe' }]}>
+                {' '}{t.passTurn || 'PASS TURN'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secPillBtn}
+              onPress={handleQuitGame}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="exit-outline" size={15} color="#ff4444" />
+              <Text style={[styles.secPillText, { color: '#ff4444' }]}>
+                {' '}{t.quit || 'QUIT'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </View>
@@ -1887,19 +1992,465 @@ const renderStore = () => {
     );
   };
 
+  const renderBottomNav = () => (
+    <View style={styles.bottomNavDock}>
+      <TouchableOpacity
+        style={styles.bottomNavItem}
+        onPress={() => { triggerHaptic('light'); setCurrentScreen('GAME'); }}
+      >
+        {currentScreen === 'GAME' && <View style={styles.bottomNavActiveIndicator} />}
+        <Ionicons
+          name="game-controller"
+          size={22}
+          color={currentScreen === 'GAME' ? '#00f2fe' : '#64748b'}
+        />
+        <Text style={[styles.bottomNavText, currentScreen === 'GAME' && styles.bottomNavTextActive]}>
+          {t.gameTab || 'Game'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.bottomNavItem}
+        onPress={() => { triggerHaptic('light'); setCurrentScreen('HISTORY'); }}
+      >
+        {currentScreen === 'HISTORY' && <View style={styles.bottomNavActiveIndicator} />}
+        <Ionicons
+          name="time"
+          size={22}
+          color={currentScreen === 'HISTORY' ? '#00f2fe' : '#64748b'}
+        />
+        <Text style={[styles.bottomNavText, currentScreen === 'HISTORY' && styles.bottomNavTextActive]}>
+          {t.historyNavTab || 'History'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.bottomNavItem}
+        onPress={() => { triggerHaptic('light'); setDashboardVisible(true); }}
+      >
+        <Ionicons name="stats-chart" size={22} color="#64748b" />
+        <Text style={styles.bottomNavText}>
+          {t.statsNavTab || 'Stats'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.bottomNavItem}
+        onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}
+      >
+        <Ionicons name="settings" size={22} color="#64748b" />
+        <Text style={styles.bottomNavText}>
+          {t.settingsNavTab || 'Settings'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
-    <View style={{flex:1, backgroundColor:'#000'}}>
+    <View style={{flex:1, backgroundColor:'#080b11'}}>
       {currentScreen === 'HOME' && renderHome()}
       {currentScreen === 'GAME' && renderGame()}
       {currentScreen === 'HISTORY' && renderHistory()}
       {renderMenuModal()}
       {renderKotariwDashboardModal()}
       {renderOperatorModal()}
+      {(currentScreen === 'GAME' || currentScreen === 'HISTORY') && renderBottomNav()}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // ── Futuristic Scorer Header ──
+  headerCenterWrap: { alignItems: 'center' },
+  headerNeonTitle: {
+    color: '#00f2fe',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 2.5,
+    textShadowColor: 'rgba(0, 242, 254, 0.7)',
+    textShadowRadius: 8,
+  },
+  tableBadge: {
+    backgroundColor: 'rgba(0, 242, 254, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+  },
+  tableBadgeText: { color: '#00f2fe', fontSize: 10, fontWeight: '800' },
+  potPillBadge: {
+    backgroundColor: 'rgba(255, 204, 0, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 204, 0, 0.25)',
+  },
+  potPillText: { color: '#ffcc00', fontSize: 11, fontWeight: '700' },
+  gearBtn: {
+    padding: 7,
+    backgroundColor: 'rgba(20, 26, 38, 0.85)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // ── Neon Player Cards (Image 2 style) ──
+  playerNeonCard: {
+    borderRadius: 16,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+  },
+  playerNeonCardActive: {
+    backgroundColor: 'rgba(10, 22, 40, 0.9)',
+    borderColor: '#00f2fe',
+    shadowColor: '#00f2fe',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.85,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  playerNeonCardInactive: {
+    backgroundColor: 'rgba(16, 22, 34, 0.75)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  turnBadgeActive: {
+    backgroundColor: '#00f2fe',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  turnBadgeActiveText: {
+    color: '#070e1b',
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  turnBadgeInactive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  turnBadgeInactiveText: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+  playerCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  playerAvatarCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: '#374151',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  playerAvatarCircleActive: {
+    borderColor: '#00f2fe',
+    backgroundColor: 'rgba(0, 242, 254, 0.15)',
+  },
+  playerAvatarLetter: {
+    color: '#9ca3af',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  playerNameText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  playerNameActive: { color: '#00f2fe' },
+  playerNameInactive: { color: '#718096' },
+  playerScoreDisplay: {
+    fontSize: 42,
+    fontWeight: '900',
+    marginVertical: 2,
+    letterSpacing: 1,
+  },
+  scoreActiveText: {
+    color: '#ffffff',
+    textShadowColor: 'rgba(0, 242, 254, 0.4)',
+    textShadowRadius: 8,
+  },
+  scoreInactiveText: { color: '#64748b' },
+  noPocketedText: { color: '#374151', fontSize: 10, letterSpacing: 2 },
+
+  // ── Metallic Pool Table (Image 2 style) ──
+  pocketChromePlate: {
+    position: 'absolute',
+    width: 28,
+    height: 28,
+    backgroundColor: '#94a3b8',
+    borderRadius: 6,
+    zIndex: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  plateTopLeft: { top: -2, left: -2, borderTopLeftRadius: 14 },
+  plateTopRight: { top: -2, right: -2, borderTopRightRadius: 14 },
+  plateBottomLeft: { bottom: -2, left: -2, borderBottomLeftRadius: 14 },
+  plateBottomRight: { bottom: -2, right: -2, borderBottomRightRadius: 14 },
+  pocketChromePlateSide: {
+    position: 'absolute',
+    width: 22,
+    height: 16,
+    backgroundColor: '#94a3b8',
+    borderRadius: 4,
+    zIndex: 6,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  plateMidLeft: { top: '50%', left: -2, marginTop: -8 },
+  plateMidRight: { top: '50%', right: -2, marginTop: -8 },
+  pocketDropHole: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#05080f',
+    zIndex: 4,
+  },
+
+  // ── Balls Remaining Pill (Image 2 style) ──
+  ballsRemainingContainer: {
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  ballsRemainingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 24, 38, 0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 242, 254, 0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  ballsRemainingText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  ballSelectedBanner: {
+    backgroundColor: 'rgba(255, 204, 0, 0.1)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 204, 0, 0.35)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    alignSelf: 'center',
+    marginTop: 8,
+  },
+  ballSelectedText: {
+    color: '#e2e8f0',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+
+  // ── Balls Sunk Card (Image 1 style) ──
+  ballsSunkCard: {
+    marginHorizontal: 15,
+    marginTop: 12,
+    backgroundColor: 'rgba(16, 22, 34, 0.7)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    padding: 10,
+  },
+  ballsSunkHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  ballsSunkTitle: {
+    color: '#94a3b8',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  cueBallBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  cueBallDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
+    marginRight: 5,
+  },
+  cueBallText: { color: '#cbd5e1', fontSize: 10, fontWeight: '700' },
+  ballsSunkList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    minHeight: 28,
+  },
+  sunkBallWrapper: {
+    position: 'relative',
+    marginRight: 6,
+    marginBottom: 4,
+  },
+  sunkCheckBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#00e676',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 5,
+  },
+  noSunkText: { color: '#64748b', fontSize: 11, fontStyle: 'italic' },
+
+  // ── Primary Neon Action Buttons (Image 2 style) ──
+  primaryActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    marginTop: 16,
+  },
+  neonBtnAdd: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 230, 118, 0.12)',
+    borderWidth: 2,
+    borderColor: '#00e676',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginRight: 8,
+    shadowColor: '#00e676',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.85,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  neonBtnAddText: {
+    color: '#00e676',
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginLeft: 6,
+  },
+  neonBtnSubtract: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 51, 102, 0.12)',
+    borderWidth: 2,
+    borderColor: '#ff3366',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginLeft: 8,
+    shadowColor: '#ff3366',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.85,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  neonBtnSubtractText: {
+    color: '#ff3366',
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    marginLeft: 6,
+  },
+
+  // ── Secondary Controls Row (Image 2 style) ──
+  secondaryControlsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    marginTop: 10,
+    marginBottom: 15,
+  },
+  secPillBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(20, 26, 38, 0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 20,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+  },
+  secPillBtnDisabled: {
+    opacity: 0.4,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  secPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+
+  // ── Bottom Dock Navigation (Image 1 & Image 2 style) ──
+  bottomNavDock: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(10, 14, 22, 0.96)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    paddingBottom: Platform.OS === 'ios' ? 24 : 10,
+    paddingTop: 8,
+  },
+  bottomNavItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    paddingVertical: 4,
+  },
+  bottomNavActiveIndicator: {
+    position: 'absolute',
+    top: -8,
+    left: '25%',
+    right: '25%',
+    height: 3,
+    backgroundColor: '#00f2fe',
+    borderRadius: 2,
+    shadowColor: '#00f2fe',
+    shadowRadius: 6,
+    shadowOpacity: 1,
+  },
+  bottomNavText: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  bottomNavTextActive: {
+    color: '#00f2fe',
+  },
+
   fullScreenBg: { flex: 1, resizeMode: 'cover' },
   bgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5, 5, 20, 0.45)' },
   bgOverlayHeavy: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(5, 5, 20, 0.85)' },
@@ -2057,7 +2608,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 12,
-    borderColor: '#5c3a1e',
+    borderColor: '#1a2230',
     elevation: 15,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
