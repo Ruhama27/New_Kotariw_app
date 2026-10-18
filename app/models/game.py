@@ -101,7 +101,8 @@ class Game:
             player["history"].append(f"-{number}")
             player["score"] -= points
 
-        self.used_numbers.append(number)
+        # Ball remains on table when penalized, only scores change
+        # self.used_numbers.append(number)
         
         # Player's turn ends after a subtract
         self.next_turn()

@@ -1,271 +1,282 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator } from 'react-native';
-
-// Set this to 10.0.2.2 for Android Emulator, or your computer's local IP (e.g. 192.168.1.5) for physical devices
-const API_BASE = "http://192.168.142.28:8000/api";
+import React, { useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ImageBackground } from 'react-native';
+import { GameEngine } from './game';
 
 export default function App() {
-  const [gameActive, setGameActive] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState('HOME'); // 'HOME' | 'SETUP' | 'GAME'
   
   // Setup State
   const [playerCount, setPlayerCount] = useState(2);
-  const [buyIn, setBuyIn] = useState('50');
+  const [playersData, setPlayersData] = useState([
+    { name: '', bet: '50' },
+    { name: '', bet: '50' }
+  ]);
   
   // Game State
+  const [gameEngine, setGameEngine] = useState(null);
   const [status, setStatus] = useState(null);
   const [selectedBall, setSelectedBall] = useState(null);
   const [winner, setWinner] = useState(null);
 
-  const apiCall = async (endpoint, method = 'GET', body = null) => {
-    setLoading(true);
-    try {
-      const options = {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-      };
-      if (body) {
-        options.body = JSON.stringify(body);
-      }
-      
-      const response = await fetch(`${API_BASE}${endpoint}`, options);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || "API request failed");
-      }
-      return data;
-    } catch (error) {
-      Alert.alert("Error", error.message);
-      throw error;
-    } finally {
-      setLoading(false);
+  const handlePlayerCountChange = (count) => {
+    setPlayerCount(count);
+    const newData = [];
+    for (let i = 0; i < count; i++) {
+       newData.push(playersData[i] || { name: '', bet: '50' });
     }
+    setPlayersData(newData);
   };
 
-  const startGame = async () => {
-    const buyInNum = Number(buyIn);
-    if (isNaN(buyInNum) || buyInNum < 50) {
-      Alert.alert("Invalid Buy-in", "Minimum buy-in is 50 Birr!");
-      return;
-    }
-    
-    try {
-      const data = await apiCall("/start", "POST", { player_count: playerCount, buy_in: buyInNum });
-      setGameActive(true);
-      setWinner(null);
-      setStatus(data);
-    } catch (e) { console.error(e); }
+  const updatePlayerData = (index, field, value) => {
+    const newData = [...playersData];
+    newData[index][field] = value;
+    setPlayersData(newData);
   };
 
-  const sendAction = async (actionType) => {
-    if (!gameActive) return;
-    if (!selectedBall) {
-      Alert.alert("Select a Ball", "Please select a pool ball first!");
-      return;
+  const startGame = () => {
+    // Validate inputs
+    for (const p of playersData) {
+      if (!p.name || !p.name.trim()) return Alert.alert("Error", "All players must have a name!");
+      const betVal = Number(p.bet);
+      if (isNaN(betVal) || betVal < 50) return Alert.alert("Invalid Bet", `${p.name || 'A player'} must bet at least 50 Birr!`);
     }
     
+    // Duplicate Name check
+    const names = playersData.map(p => p.name.trim().toLowerCase());
+    if (new Set(names).size !== names.length) {
+      return Alert.alert("Error", "All players must have unique names!");
+    }
+
+    const engine = new GameEngine(playersData);
+    setGameEngine(engine);
+    setWinner(null);
+    setStatus(engine.getStatus());
+    setCurrentScreen('GAME');
+  };
+
+  const sendAction = (actionType) => {
+    if (!gameEngine) return;
+    if (!selectedBall) return Alert.alert("Select a Ball", "Please select a pool ball first!");
+    
     try {
-      const data = await apiCall("/action", "POST", {
-        player_id: status.current_player,
-        number: selectedBall,
-        action: actionType
-      });
+      if (actionType === 'add') {
+         gameEngine.addScore(status.current_player, selectedBall);
+      } else {
+         gameEngine.subtractScore(status.current_player, selectedBall);
+      }
       
-      setStatus(data.status);
+      setStatus({ ...gameEngine.getStatus() });
       setSelectedBall(null);
       
-      if (data.winner) {
-        setWinner(data.winner);
-        setGameActive(false);
+      const winnerData = gameEngine.checkWinner();
+      if (winnerData) {
+        setWinner(winnerData);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      Alert.alert("Action Error", e.message);
+    }
   };
 
-  const resetGame = async () => {
-    try {
-      await apiCall("/reset", "POST");
-      setGameActive(false);
-      setStatus(null);
-      setWinner(null);
-      setSelectedBall(null);
-    } catch (e) { console.error(e); }
+  const resetToHome = () => {
+    setGameEngine(null);
+    setStatus(null);
+    setWinner(null);
+    setSelectedBall(null);
+    setCurrentScreen('HOME');
   };
 
-  const renderPoolBalls = () => {
-    const balls = [];
-    const used = status?.used_numbers || [];
-    
-    for (let i = 3; i <= 15; i++) {
-      const isUsed = used.includes(i);
-      const isSelected = selectedBall === i;
-      
-      balls.push(
-        <TouchableOpacity
-          key={i}
-          disabled={isUsed || !gameActive}
-          style={[
-            styles.poolBall,
-            isUsed && styles.poolBallUsed,
-            isSelected && styles.poolBallSelected
-          ]}
-          onPress={() => setSelectedBall(i)}
-        >
-          <View style={styles.poolBallInner}>
-            <Text style={styles.poolBallText}>{i}</Text>
-          </View>
+  // UI Renderers
+  const renderHome = () => (
+    <ImageBackground source={require('./assets/splash_bg.png')} style={styles.homeBackground}>
+      <View style={styles.homeOverlay}>
+        <Text style={styles.titleLogo}>KOTARIW</Text>
+        <Text style={styles.subtitleLogo}>SCORE TRACKER</Text>
+        
+        <TouchableOpacity style={styles.playButton} onPress={() => setCurrentScreen('SETUP')}>
+          <Text style={styles.playButtonText}>START GAME</Text>
         </TouchableOpacity>
-      );
+      </View>
+    </ImageBackground>
+  );
+
+  const renderSetup = () => (
+    <View style={styles.container}>
+      <Text style={styles.title}>Game Setup</Text>
+      
+      <View style={styles.setupCard}>
+        <Text style={styles.label}>Number of Players:</Text>
+        <View style={styles.buttonGroup}>
+          {[2, 3, 4].map(num => (
+            <TouchableOpacity 
+              key={num} 
+              style={[styles.countButton, playerCount === num && styles.activeButton]}
+              onPress={() => handlePlayerCountChange(num)}
+            >
+              <Text style={[styles.buttonText, playerCount === num && styles.activeButtonText]}>{num}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={[styles.label, {marginTop: 20}]}>Player Settings:</Text>
+        <ScrollView style={{maxHeight: 350}} showsVerticalScrollIndicator={false}>
+          {playersData.map((p, i) => (
+             <View key={i} style={styles.playerSetupRow}>
+                <TextInput 
+                   style={styles.nameInput}
+                   value={p.name}
+                   onChangeText={(v) => updatePlayerData(i, 'name', v)}
+                   placeholder={`Name ${i+1}`}
+                   placeholderTextColor="#888"
+                />
+                <TextInput 
+                   style={styles.betInput}
+                   value={p.bet}
+                   onChangeText={(v) => updatePlayerData(i, 'bet', v)}
+                   keyboardType="numeric"
+                   placeholder="Bet"
+                   placeholderTextColor="#888"
+                />
+                <Text style={styles.currencyTag}>Birr</Text>
+             </View>
+          ))}
+        </ScrollView>
+      </View>
+
+      <TouchableOpacity style={styles.startButton} onPress={startGame}>
+         <Text style={styles.startButtonText}>Lets Go!</Text>
+      </TouchableOpacity>
+      <TouchableOpacity style={{marginTop:20}} onPress={resetToHome}>
+         <Text style={{color: '#999', fontSize: 16}}>Cancel</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderGame = () => {
+    if (!status) return null;
+
+    if (winner) {
+       return (
+         <View style={styles.winnerContainer}>
+           <Text style={styles.winnerText}>🏆 {winner.winner_id} Wins!</Text>
+           <Text style={styles.scoreText}>Final Score: {winner.winner_score}</Text>
+           
+           <View style={styles.financialCard}>
+             <Text style={styles.financialTitle}>Prize Breakdown</Text>
+             <Text style={styles.financialText}>Total Pot: {winner.total_pot.toFixed(2)} Birr</Text>
+             <View style={styles.divider} />
+             <Text style={styles.financialText}>🥇 Winner ({winner.winner_id}): {(winner.prize_winner).toFixed(2)}</Text>
+             <Text style={styles.financialText}>🏠 Kotariw (Host): {(winner.prize_kotariw).toFixed(2)}</Text>
+             <Text style={styles.financialText}>🎲 Game Fee: {(winner.prize_game).toFixed(2)}</Text>
+           </View>
+
+           <TouchableOpacity style={styles.startButton} onPress={resetToHome}>
+              <Text style={styles.startButtonText}>Main Menu</Text>
+           </TouchableOpacity>
+         </View>
+       );
     }
-    return <View style={styles.ballsContainer}>{balls}</View>;
+
+    return (
+      <View style={styles.container}>
+        <Text style={styles.infoText}>Turn: {status.current_player}</Text>
+        <Text style={styles.potText}>Total Pot: {status.total_pot} Birr</Text>
+        
+        {/* Render Players Data dynamically */}
+        <View style={styles.scoresWrap}>
+          {Object.keys(status.players).length > 0 && Array.isArray(status.players) ? (
+            status.players.map(p => (
+              <View key={p.id} style={[styles.playerCard, status.current_player === p.id && styles.activePlayerCard]}>
+                <Text numberOfLines={1} style={styles.playerName}>{p.id}</Text>
+                <Text style={styles.playerScore}>{p.score}</Text>
+              </View>
+            ))
+          ) : (
+             Object.keys(status.players).map(pid => (
+              <View key={pid} style={[styles.playerCard, status.current_player === pid && styles.activePlayerCard]}>
+                <Text numberOfLines={1} style={styles.playerName}>{pid}</Text>
+                <Text style={styles.playerScore}>{status.players[pid].total_score}</Text>
+              </View>
+             ))
+          )}
+        </View>
+
+        {/* Selection Grid */}
+        <View style={styles.grid}>
+          {status.remaining_numbers.map(num => (
+            <TouchableOpacity 
+              key={num}
+              style={[styles.ballButton, selectedBall === num && styles.selectedBall]}
+              onPress={() => setSelectedBall(num)}
+            >
+              <Text style={styles.ballText}>{num}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.actionRow}>
+           <TouchableOpacity style={[styles.actionBtn, styles.addBtn]} onPress={() => sendAction('add')}>
+              <Text style={styles.actionBtnText}>Add ➕</Text>
+           </TouchableOpacity>
+           <TouchableOpacity style={[styles.actionBtn, styles.subBtn]} onPress={() => sendAction('subtract')}>
+              <Text style={styles.actionBtnText}>Penalize ➖</Text>
+           </TouchableOpacity>
+        </View>
+      </View>
+    );
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Score Game</Text>
-      <Text style={styles.subtitle}>Multiplayer Number Challenge</Text>
-
-      {/* GAME SETUP */}
-      {!gameActive && !winner && (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Start Game</Text>
-          
-          <Text style={styles.label}>Players (2-4):</Text>
-          <View style={styles.row}>
-            {[2,3,4].map(num => (
-              <TouchableOpacity 
-                key={num} 
-                style={[styles.btnToggle, playerCount === num && styles.btnToggleActive]}
-                onPress={() => setPlayerCount(num)}
-              >
-                <Text style={[styles.btnToggleText, playerCount === num && styles.btnToggleTextActive]}>{num}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <Text style={styles.label}>Buy-in per Player (Birr):</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={buyIn}
-            onChangeText={setBuyIn}
-          />
-
-          <TouchableOpacity style={styles.btnPrimary} onPress={startGame} disabled={loading}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnPrimaryText}>Start Game</Text>}
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* WINNER BOX */}
-      {winner && (
-        <View style={[styles.card, { borderColor: '#f8c300', borderWidth: 2 }]}>
-          <Text style={styles.cardTitle}>🏆 Winner: {winner.winner_id}</Text>
-          <Text style={styles.winnerText}>Wins with {winner.winner_score} points!</Text>
-          
-          <View style={styles.prizeBox}>
-            <Text style={styles.prizeTitle}>💰 Prize Distribution (Pot: {winner.total_pot} Birr)</Text>
-            <Text style={styles.prizeStat}>➤ Paid to {winner.winner_id} (70%): {winner.prize_winner.toFixed(2)} Birr</Text>
-            <Text style={styles.prizeStat}>➤ Paid to Kotariw (20%): {winner.prize_kotariw.toFixed(2)} Birr</Text>
-            <Text style={styles.prizeStat}>➤ Game Fee (10%): {winner.prize_game.toFixed(2)} Birr</Text>
-          </View>
-          
-          <TouchableOpacity style={[styles.btnPrimary, {marginTop: 20}]} onPress={resetGame}>
-            <Text style={styles.btnPrimaryText}>Play Again</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* ACTIVE GAME */}
-      {gameActive && status && (
-        <View style={styles.activeContainer}>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Player Action</Text>
-            <Text style={styles.turnText}>Current Turn: {status.current_player}</Text>
-            
-            <Text style={styles.label}>Select a Pool Ball:</Text>
-            {renderPoolBalls()}
-
-            <View style={styles.actionRow}>
-              <TouchableOpacity 
-                style={[styles.btnAction, styles.btnAdd, !selectedBall && styles.btnDisabled]} 
-                onPress={() => sendAction('add')}
-                disabled={!selectedBall || loading}
-              >
-                <Text style={styles.btnActionText}>Add</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.btnAction, styles.btnSub, !selectedBall && styles.btnDisabled]} 
-                onPress={() => sendAction('subtract')}
-                disabled={!selectedBall || loading}
-              >
-                <Text style={styles.btnActionText}>Subtract</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Game Status</Text>
-            <Text style={styles.statusText}>🎯 Balls Remaining: {status.remaining_numbers?.length || 0}/13</Text>
-            
-            <View style={styles.scoresContainer}>
-              {status.player_count === 2 
-                ? Object.keys(status.players).map(pid => (
-                    <Text key={pid} style={styles.scoreText}>{pid}: {status.players[pid].total_score} pts</Text>
-                  ))
-                : status.players.map(p => (
-                    <Text key={p.id} style={styles.scoreText}>{p.id}: {p.score} pts</Text>
-                  ))
-              }
-            </View>
-            
-            <TouchableOpacity style={[styles.btnPrimary, {backgroundColor: '#e74c3c'}]} onPress={resetGame}>
-              <Text style={styles.btnPrimaryText}>Reset Game</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-    </ScrollView>
+    <View style={{flex:1}}>
+      {currentScreen === 'HOME' && renderHome()}
+      {currentScreen === 'SETUP' && renderSetup()}
+      {currentScreen === 'GAME' && renderGame()}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a3d2f' },
-  content: { padding: 20, alignItems: 'center', paddingTop: 60, paddingBottom: 40 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#f8c300', marginBottom: 5 },
-  subtitle: { fontSize: 16, color: '#b8e0d5', marginBottom: 30 },
-  card: { width: '100%', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 15, padding: 20, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
-  cardTitle: { fontSize: 22, fontWeight: 'bold', color: '#f8c300', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: 'rgba(248, 195, 0, 0.3)', paddingBottom: 10 },
-  label: { fontSize: 16, color: '#b8e0d5', marginBottom: 10, marginTop: 10 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  btnToggle: { flex: 1, padding: 12, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 8, marginHorizontal: 5, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },
-  btnToggleActive: { backgroundColor: '#f8c300', borderColor: '#f8c300' },
-  btnToggleText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  btnToggleTextActive: { color: '#333' },
-  input: { backgroundColor: 'rgba(255,255,255,0.1)', color: '#fff', padding: 15, borderRadius: 8, fontSize: 16, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(248,195,0,0.3)' },
-  btnPrimary: { backgroundColor: '#f8c300', padding: 15, borderRadius: 10, alignItems: 'center' },
-  btnPrimaryText: { color: '#333', fontSize: 18, fontWeight: 'bold' },
-  activeContainer: { width: '100%' },
-  turnText: { fontSize: 18, color: '#fff', fontWeight: 'bold', marginBottom: 15, textAlign: 'center', backgroundColor: 'rgba(248,195,0,0.2)', padding: 10, borderRadius: 8 },
-  ballsContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginBottom: 20 },
-  poolBall: { width: 45, height: 45, borderRadius: 25, backgroundColor: '#d32f2f', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#fff' },
-  poolBallInner: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  poolBallText: { fontWeight: 'bold', color: '#000', fontSize: 12 },
-  poolBallUsed: { opacity: 0.3 },
-  poolBallSelected: { transform: [{scale: 1.2}], borderColor: '#f8c300', borderWidth: 3 },
-  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  btnAction: { flex: 1, padding: 15, borderRadius: 8, alignItems: 'center', marginHorizontal: 5 },
-  btnAdd: { backgroundColor: '#2ecc71' },
-  btnSub: { backgroundColor: '#e74c3c' },
-  btnActionText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  btnDisabled: { opacity: 0.5 },
-  statusText: { fontSize: 16, color: '#fff', marginBottom: 10 },
-  scoresContainer: { backgroundColor: 'rgba(0,0,0,0.2)', padding: 15, borderRadius: 8, marginBottom: 20 },
-  scoreText: { color: '#f8c300', fontSize: 18, fontWeight: 'bold', marginBottom: 5 },
-  winnerText: { fontSize: 18, color: '#fff', textAlign: 'center', marginBottom: 20 },
-  prizeBox: { backgroundColor: 'rgba(0,0,0,0.4)', padding: 15, borderRadius: 10 },
-  prizeTitle: { color: '#f8c300', fontWeight: 'bold', fontSize: 16, marginBottom: 10, textAlign: 'center' },
-  prizeStat: { color: '#b8e0d5', fontSize: 14, marginBottom: 5 }
+  container: { flex: 1, backgroundColor: '#1e1e1e', alignItems: 'center', paddingTop: 60, paddingHorizontal: 15 },
+  homeBackground: { flex: 1, resizeMode: 'cover', justifyContent: 'center', alignItems: 'center' },
+  homeOverlay: { backgroundColor: 'rgba(0,0,0,0.65)', padding: 40, borderRadius: 20, alignItems: 'center', width: '90%' },
+  titleLogo: { fontSize: 44, fontWeight: '900', color: '#00ff88', fontStyle: 'italic', textShadowColor: '#000', textShadowOffset: {width: 2, height: 2}, textShadowRadius: 10 },
+  subtitleLogo: { fontSize: 18, color: '#fff', letterSpacing: 5, marginBottom: 60 },
+  playButton: { backgroundColor: '#ffcc00', paddingVertical: 18, paddingHorizontal: 55, borderRadius: 40, elevation: 5 },
+  playButtonText: { fontSize: 24, fontWeight: 'bold', color: '#111' },
+  title: { fontSize: 28, color: '#fff', fontWeight: 'bold', marginBottom: 20 },
+  setupCard: { backgroundColor: '#2a2a2a', width: '100%', padding: 20, borderRadius: 15, marginBottom: 20 },
+  label: { color: '#ccc', fontSize: 16, marginBottom: 12 },
+  buttonGroup: { flexDirection: 'row', justifyContent: 'center', gap: 10 },
+  countButton: { backgroundColor: '#333', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 10 },
+  activeButton: { backgroundColor: '#00ff88' },
+  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  activeButtonText: { color: '#111' },
+  playerSetupRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  nameInput: { flex: 2, backgroundColor: '#111', color: '#00ff88', padding: 14, borderRadius: 10, marginRight: 10, fontSize: 16 },
+  betInput: { flex: 1, backgroundColor: '#111', color: '#ffcc00', padding: 14, borderRadius: 10, fontSize: 16, textAlign: 'center' },
+  currencyTag: { color: '#888', marginLeft: 8, fontSize: 14 },
+  startButton: { backgroundColor: '#ffcc00', paddingVertical: 18, width: '100%', borderRadius: 12, alignItems: 'center' },
+  startButtonText: { color: '#111', fontSize: 22, fontWeight: 'bold' },
+  infoText: { color: '#00ff88', fontSize: 24, fontWeight: 'bold', marginBottom: 5 },
+  potText: { color: '#ffcc00', fontSize: 18, marginBottom: 20 },
+  scoresWrap: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, width: '100%', marginBottom: 30 },
+  playerCard: { backgroundColor: '#333', padding: 12, borderRadius: 12, alignItems: 'center', width: '45%' },
+  activePlayerCard: { borderColor: '#00ff88', borderWidth: 2, backgroundColor: '#224422' },
+  playerName: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  playerScore: { color: '#00ff88', fontSize: 28, fontWeight: 'bold', marginTop: 5 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', width: '100%', rowGap: 12, columnGap: 12 },
+  ballButton: { width: 55, height: 55, borderRadius: 27.5, backgroundColor: '#222', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#555' },
+  selectedBall: { borderColor: '#00ff88', backgroundColor: '#333' },
+  ballText: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 30 },
+  actionBtn: { flex: 1, paddingVertical: 18, borderRadius: 12, alignItems: 'center', marginHorizontal: 10 },
+  addBtn: { backgroundColor: '#00ff88' },
+  subBtn: { backgroundColor: '#ff4444' },
+  actionBtnText: { fontSize: 18, fontWeight: 'bold', color: '#111' },
+  winnerContainer: { flex: 1, backgroundColor: '#1e1e1e', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  winnerText: { fontSize: 40, color: '#00ff88', fontWeight: 'bold', marginBottom: 10, textAlign: 'center' },
+  scoreText: { fontSize: 24, color: '#fff', marginBottom: 40 },
+  financialCard: { backgroundColor: '#2a2a2a', width: '100%', padding: 25, borderRadius: 15, marginBottom: 40 },
+  financialTitle: { color: '#ffcc00', fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  financialText: { color: '#fff', fontSize: 18, marginBottom: 10 },
+  divider: { height: 1, backgroundColor: '#555', marginVertical: 15 }
 });

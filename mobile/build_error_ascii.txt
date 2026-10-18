@@ -1,0 +1,35 @@
+Running 17 checks on your project...
+16/17 checks passed. 1 checks failed. Possible issues detected:
+Use the --verbose flag to see more details about passed checks.
+
+??? Check Expo config (app.json/ app.config.js) schema
+Error validating asset fields in C:\Users\hp\Desktop\Kotariw 1\mobile\app.json:
+ Field: Android.adaptiveIcon.foregroundImage - the file extension should match the content, but the file extension is .png while the file content at './assets/icon.png' is of type jpg.
+ Field: Android.adaptiveIcon.foregroundImage - field 'Android.adaptiveIcon.foregroundImage' should point to .png image but the file at './assets/icon.png' has type jpg.
+ Field: Splash.image - the file extension should match the content, but the file extension is .png while the file content at './assets/icon.png' is of type jpg.
+ Field: Splash.image - field 'Splash.image' should point to .png image but the file at './assets/icon.png' has type jpg.
+ Field: icon - the file extension should match the content, but the file extension is .png while the file content at './assets/icon.png' is of type jpg.
+ Field: icon - field 'icon' should point to .png image but the file at './assets/icon.png' has type jpg.
+Advice:
+Resolve schema errors in your app config. Learn more: https://docs.expo.dev/workflow/configuration/
+
+node.exe : 1 check 
+failed, indicating 
+possible issues with the 
+project.
+At C:\Program 
+Files\nodejs\npx.ps1:29 
+char:3
++   & $NODE_EXE 
+$NPX_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~
+    + CategoryInfo        
+      : NotSpecified    : 
+(1 check failed,.    ..th 
+the project.:S    tring) 
+[], RemoteEx    ception
+    + FullyQualifiedErr   
+ orId : NativeComman    
+dError
+ 
