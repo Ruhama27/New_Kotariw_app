@@ -567,6 +567,14 @@ export default function App() {
     }
   };
 
+  const handleSelectPlayerTurn = (playerIndex) => {
+    if (!gameEngine || (status && status.game_over)) return;
+    triggerHaptic('light');
+    gameEngine.setTurn(playerIndex);
+    setStatus({ ...gameEngine.getStatus() });
+    setSelectedBall(null);
+  };
+
   const handlePassTurn = () => {
     if (!gameEngine) return;
     triggerHaptic('light');
@@ -1746,8 +1754,10 @@ const renderStore = () => {
               const isActive = status.current_player === pId;
 
               return (
-                <View
+                <TouchableOpacity
                   key={pId}
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectPlayerTurn(i)}
                   style={[
                     styles.playerNeonCard,
                     isActive ? styles.playerNeonCardActive : styles.playerNeonCardInactive,
@@ -1791,7 +1801,7 @@ const renderStore = () => {
                       <Text style={styles.noPocketedText}>- - -</Text>
                     )}
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>

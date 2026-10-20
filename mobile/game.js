@@ -47,6 +47,17 @@ export class GameEngine {
         this.current_player_index = (this.current_player_index + 1) % this.player_count;
     }
 
+    setTurn(playerIndexOrId) {
+        if (typeof playerIndexOrId === 'number') {
+            this.current_player_index = Math.abs(playerIndexOrId) % this.player_count;
+        } else {
+            const idx = this.player_list.indexOf(playerIndexOrId);
+            if (idx !== -1) {
+                this.current_player_index = idx;
+            }
+        }
+    }
+
     calculateScore(number, isTwoPlayer) {
         if (isTwoPlayer && number === 3) return 6;
         return number;
@@ -82,10 +93,7 @@ export class GameEngine {
             number,
             previous_player_index: prevPlayerIndex
         });
-
-        if (this.player_count > 2) {
-            this.nextTurn();
-        }
+        // Scorer keeps their turn. Turn only passes when a player loses a point or manually passes turn.
     }
 
     subtractScore(playerId, number) {
