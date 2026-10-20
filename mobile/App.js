@@ -1933,41 +1933,6 @@ const renderStore = () => {
               </View>
             </View>
 
-            {/* Ball Selection Alert Banner */}
-            {selectedBall ? (
-              <View style={styles.ballSelectedBanner}>
-                <Text style={styles.ballSelectedText}>
-                  Ball <Text style={{ color: '#ffcc00', fontWeight: '900' }}>{selectedBall}</Text> selected — Tap <Text style={{ color: '#00e676', fontWeight: 'bold' }}>+ {t.point || 'POINT'}</Text> or <Text style={{ color: '#ff3366', fontWeight: 'bold' }}>- {t.point || 'POINT'}</Text>
-                </Text>
-              </View>
-            ) : (
-              <Text style={styles.tableBallHint}>Tap a ball on the table to score or penalize</Text>
-            )}
-          </View>
-
-          {/* ── BALLS SUNK / POCKETED CARD (Image 1 style) ── */}
-          <View style={styles.ballsSunkCard}>
-            <View style={styles.ballsSunkHeader}>
-              <Text style={styles.ballsSunkTitle}>{t.ballsSunk || 'BALLS SUNK'}</Text>
-              <View style={styles.cueBallBadge}>
-                <View style={styles.cueBallDot} />
-                <Text style={styles.cueBallText}>Cue Ball {t.cueBallReady || 'Ready'}</Text>
-              </View>
-            </View>
-            <View style={styles.ballsSunkList}>
-              {status.used_numbers && status.used_numbers.length > 0 ? (
-                status.used_numbers.map(num => (
-                  <View key={num} style={styles.sunkBallWrapper}>
-                    <MiniatureBall item={'+' + num} />
-                    <View style={styles.sunkCheckBadge}>
-                      <Ionicons name="checkmark" size={8} color="#fff" />
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.noSunkText}>{t.allBallsOnTable || 'All balls on table'}</Text>
-              )}
-            </View>
           </View>
 
           {/* ── HIGH-QUALITY TACTILE ACTION BUTTONS (Image 1 improved) ── */}
