@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ImageBackground, Modal, StatusBar, KeyboardAvoidingView, Platform, Vibration, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ImageBackground, Modal, StatusBar, KeyboardAvoidingView, Platform, Vibration, ActivityIndicator, Image, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,7 +7,7 @@ import { GameEngine } from './game';
 import { translations } from './i18n';
 import { loadSounds, unloadSounds, playSound, setSoundEnabled, playBackgroundMusic, stopBackgroundMusic } from './sounds';
 import * as WebBrowser from 'expo-web-browser';
-import { initializeChapaPayment, verifyChapaPayment, getChapaSecretKey, getChapaPublicKey, saveChapaKeys } from './payment';
+import { initializeChapaPayment, verifyChapaPayment, getChapaSecretKey, getChapaPublicKey, saveChapaKeys, getTelebirrConfig, saveTelebirrConfig, getTelebirrQRUrl, recordPurchase } from './payment';
 
 const getTodayDateString = () => {
   const d = new Date();
@@ -116,26 +116,46 @@ export default function App() {
   const [storeVisible, setStoreVisible] = useState(false);
 
   // Payment States
-  const [paymentStep, setPaymentStep] = useState('packages'); // packages, method, manual, processing, settings
+  const [paymentStep, setPaymentStep] = useState('packages'); // packages, method, telebirr, manual, processing, settings
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [verifyingTx, setVerifyingTx] = useState(false);
   const [currentTxRef, setCurrentTxRef] = useState('');
   const [pubKeyInput, setPubKeyInput] = useState('');
   const [secKeyInput, setSecKeyInput] = useState('');
 
+  // Telebirr & Venue Operator Payment Config
+  const [telebirrConfig, setTelebirrConfig] = useState({
+    merchant: '991122',
+    phone: '0911223344',
+    name: 'Kotariw Game Co.',
+    cbe: '1000123456789'
+  });
+  const [tbMerchantInput, setTbMerchantInput] = useState('');
+  const [tbPhoneInput, setTbPhoneInput] = useState('');
+  const [tbNameInput, setTbNameInput] = useState('');
+  const [cbeAccountInput, setCbeAccountInput] = useState('');
+  const [telebirrTxnInput, setTelebirrTxnInput] = useState('');
+
   useEffect(() => {
     if (storeVisible) {
-      const loadKeys = async () => {
+      const loadAllConfig = async () => {
         const pub = await getChapaPublicKey();
         const sec = await getChapaSecretKey();
         setPubKeyInput(pub);
         setSecKeyInput(sec);
+        const tb = await getTelebirrConfig();
+        setTelebirrConfig(tb);
+        setTbMerchantInput(tb.merchant);
+        setTbPhoneInput(tb.phone);
+        setTbNameInput(tb.name);
+        setCbeAccountInput(tb.cbe);
       };
-      loadKeys();
+      loadAllConfig();
     } else {
       setPaymentStep('packages');
       setSelectedPackage(null);
       setVerifyingTx(false);
+      setTelebirrTxnInput('');
     }
   }, [storeVisible]);
 
@@ -370,14 +390,68 @@ export default function App() {
     }
   };
 
-  const handleSaveChapaKeys = async () => {
-    const success = await saveChapaKeys(pubKeyInput, secKeyInput);
-    if (success) {
+  const handleSaveAllSettings = async () => {
+    const chapaOk = await saveChapaKeys(pubKeyInput, secKeyInput);
+    const tbOk = await saveTelebirrConfig({
+      merchant: tbMerchantInput,
+      phone: tbPhoneInput,
+      name: tbNameInput,
+      cbe: cbeAccountInput,
+    });
+    if (chapaOk && tbOk) {
+      setTelebirrConfig({
+        merchant: tbMerchantInput.trim(),
+        phone: tbPhoneInput.trim(),
+        name: tbNameInput.trim(),
+        cbe: cbeAccountInput.trim(),
+      });
       Alert.alert(t.settingsSaved, t.settingsSaved);
       setPaymentStep('packages');
     } else {
-      Alert.alert(t.error, 'Failed to save API keys.');
+      Alert.alert(t.error, 'Failed to save settings.');
     }
+  };
+
+  const handleConfirmTelebirr = async () => {
+    if (!telebirrTxnInput || telebirrTxnInput.trim().length < 4) {
+      Alert.alert(t.error, t.telebirrTxnTooShort);
+      return;
+    }
+    const addedCoins = selectedPackage ? selectedPackage.amount : 1;
+    const newVal = (coins || 0) + addedCoins;
+    await AsyncStorage.setItem('kotariw_coins', newVal.toString());
+    setCoins(newVal);
+    await recordPurchase({
+      method: 'telebirr',
+      coins: addedCoins,
+      amount: selectedPackage ? selectedPackage.price : 0,
+      txnRef: telebirrTxnInput.trim(),
+      receiver: telebirrConfig.merchant || telebirrConfig.phone,
+      operator,
+      table: tableNumber,
+    });
+    playSound('payment_success');
+    triggerHaptic('success');
+    Alert.alert(t.telebirrSuccessTitle, t.telebirrSuccessMsg(addedCoins));
+    setStoreVisible(false);
+  };
+
+  const handleOpenTelebirrApp = async () => {
+    try {
+      const url = 'telebirr://';
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        await Linking.openURL('https://play.google.com/store/apps/details?id=cn.tydic.ethiopay');
+      }
+    } catch (e) {
+      Linking.openURL('https://play.google.com/store/apps/details?id=cn.tydic.ethiopay');
+    }
+  };
+
+  const handleDialTelebirrUssd = () => {
+    Linking.openURL('tel:*127%23');
   };
 
   const handleConfirmManualTransfer = () => {
@@ -1007,6 +1081,7 @@ const renderStore = () => {
                       onPress={() => {
                         triggerHaptic('light');
                         if (paymentStep === 'method') setPaymentStep('packages');
+                        else if (paymentStep === 'telebirr') setPaymentStep('method');
                         else if (paymentStep === 'manual') setPaymentStep('method');
                         else if (paymentStep === 'settings') setPaymentStep('packages');
                       }}
@@ -1016,7 +1091,9 @@ const renderStore = () => {
                     </TouchableOpacity>
                   )}
                   <Text style={styles.modalTitle}>
-                    {paymentStep === 'settings' ? t.chapaApiSettings : t.coinStore}
+                    {paymentStep === 'settings' ? t.venueSettingsTitle : 
+                     paymentStep === 'telebirr' ? t.telebirrTitle : 
+                     t.coinStore}
                   </Text>
                 </View>
                 
@@ -1112,22 +1189,139 @@ const renderStore = () => {
                     {t.selectPaymentMethod} ({selectedPackage.amount} {selectedPackage.amount === 1 ? 'Coin' : 'Coins'} - {selectedPackage.price} Birr)
                   </Text>
 
-                  {/* Chapa Option */}
-                  <TouchableOpacity onPress={startChapaPayment} style={{ marginTop: 15 }}>
-                    <LinearGradient colors={['#00cfff', '#007bb6']} style={styles.storeBtnInner}>
-                      <Ionicons name="card" size={24} color="#111" />
-                      <Text style={styles.storeBtnText}>{t.telebirrOrBank}</Text>
+                  {/* 1. Direct Telebirr QR Pay (Top & Prominent) */}
+                  <TouchableOpacity 
+                    onPress={() => { triggerHaptic('light'); setPaymentStep('telebirr'); }} 
+                    style={{ marginTop: 14 }}
+                  >
+                    <LinearGradient colors={['#0072bc', '#004e82']} style={styles.storeBtnInner}>
+                      <MaterialCommunityIcons name="qrcode-scan" size={26} color="#fff" />
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={[styles.storeBtnText, { color: '#fff', textAlign: 'left', flex: 0 }]}>{t.telebirrPay}</Text>
+                          <View style={styles.popularBadge}>
+                            <Text style={styles.popularBadgeText}>{t.telebirrDirectBadge}</Text>
+                          </View>
+                        </View>
+                        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 }}>{t.telebirrSubtitle}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#00cfff" />
                     </LinearGradient>
                   </TouchableOpacity>
 
-                  {/* Manual Bank Transfer Option */}
-                  <TouchableOpacity onPress={() => { triggerHaptic('light'); setPaymentStep('manual'); }} style={{ marginTop: 15 }}>
-                    <LinearGradient colors={['#ff8a65', '#d84315']} style={styles.storeBtnInner}>
+                  {/* 2. Chapa Gateway (Cards, CBE, Telebirr) */}
+                  <TouchableOpacity onPress={startChapaPayment} style={{ marginTop: 14 }}>
+                    <LinearGradient colors={['#00a896', '#028090']} style={styles.storeBtnInner}>
+                      <Ionicons name="card" size={24} color="#fff" />
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={[styles.storeBtnText, { color: '#fff', textAlign: 'left' }]}>{t.chapaPay}</Text>
+                        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 }}>Visa, Mastercard, CBE, Telebirr Gateway</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#889" />
+                    </LinearGradient>
+                  </TouchableOpacity>
+
+                  {/* 3. Manual Bank Transfer Option */}
+                  <TouchableOpacity onPress={() => { triggerHaptic('light'); setPaymentStep('manual'); }} style={{ marginTop: 14 }}>
+                    <LinearGradient colors={['#e76f51', '#c84b31']} style={styles.storeBtnInner}>
                       <Ionicons name="cash" size={24} color="#fff" />
-                      <Text style={[styles.storeBtnText, { color: '#fff' }]}>{t.manualBankTransfer}</Text>
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={[styles.storeBtnText, { color: '#fff', textAlign: 'left' }]}>{t.manualBankTransfer}</Text>
+                        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 }}>CBE: {telebirrConfig.cbe}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={22} color="#889" />
                     </LinearGradient>
                   </TouchableOpacity>
                 </View>
+              )}
+
+              {/* STEP 2.5: DIRECT TELEBIRR QR PAY */}
+              {paymentStep === 'telebirr' && selectedPackage && (
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingBottom: 25 }}>
+                  {/* Amount Banner */}
+                  <LinearGradient colors={['#004e82', '#0072bc']} style={styles.tbAmountBanner}>
+                    <Text style={styles.tbAmountText}>
+                      {selectedPackage.price} ETB
+                    </Text>
+                    <Text style={styles.tbCoinSub}>
+                      ({selectedPackage.amount} {selectedPackage.amount === 1 ? 'Coin' : 'Coins'})
+                    </Text>
+                  </LinearGradient>
+
+                  <Text style={styles.tbScanInstr}>
+                    {t.telebirrScanInstr}
+                  </Text>
+
+                  {/* High Quality Dynamic QR Code Frame */}
+                  <View style={styles.tbQrWrapper}>
+                    <View style={styles.tbQrCard}>
+                      <Image 
+                        source={{ uri: getTelebirrQRUrl(selectedPackage.price, telebirrConfig.merchant, telebirrConfig.name) }} 
+                        style={styles.tbQrImage}
+                        resizeMode="contain"
+                      />
+                      <View style={styles.tbQrFooter}>
+                        <MaterialCommunityIcons name="qrcode-scan" size={16} color="#0072bc" />
+                        <Text style={styles.tbQrFooterText}>Telebirr QR Pay</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Telebirr Venue Merchant Details */}
+                  <View style={styles.tbDetailsBox}>
+                    <View style={styles.tbDetailRow}>
+                      <Text style={styles.tbDetailLabel}>{t.merchantCode}:</Text>
+                      <Text style={styles.tbDetailValHighlight}>{telebirrConfig.merchant}</Text>
+                    </View>
+                    <View style={styles.tbDetailDivider} />
+                    <View style={styles.tbDetailRow}>
+                      <Text style={styles.tbDetailLabel}>{t.phoneNum}:</Text>
+                      <Text style={styles.tbDetailVal}>{telebirrConfig.phone}</Text>
+                    </View>
+                    <View style={styles.tbDetailDivider} />
+                    <View style={styles.tbDetailRow}>
+                      <Text style={styles.tbDetailLabel}>{t.receiverName}:</Text>
+                      <Text style={styles.tbDetailVal}>{telebirrConfig.name}</Text>
+                    </View>
+                  </View>
+
+                  {/* Fast Action Buttons: Open App / Dial USSD */}
+                  <View style={styles.tbActionsRow}>
+                    <TouchableOpacity onPress={handleOpenTelebirrApp} style={styles.tbActionBtn}>
+                      <LinearGradient colors={['#00AEEF', '#0072BC']} style={styles.tbActionBtnGrad}>
+                        <Ionicons name="open-outline" size={18} color="#fff" />
+                        <Text style={styles.tbActionBtnText}>{t.openTelebirrApp}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity onPress={handleDialTelebirrUssd} style={styles.tbActionBtn}>
+                      <LinearGradient colors={['#2a9d8f', '#1b6a60']} style={styles.tbActionBtnGrad}>
+                        <Ionicons name="call" size={18} color="#fff" />
+                        <Text style={styles.tbActionBtnText}>{t.dialUssdCode}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Confirmation Section */}
+                  <View style={styles.tbConfirmBox}>
+                    <Text style={styles.tbConfirmLabel}>{t.telebirrTxnPrompt}</Text>
+                    <TextInput
+                      style={styles.tbConfirmInput}
+                      value={telebirrTxnInput}
+                      onChangeText={setTelebirrTxnInput}
+                      placeholder={t.telebirrTxnPlaceholder}
+                      placeholderTextColor="#667"
+                      autoCapitalize="characters"
+                    />
+
+                    <TouchableOpacity onPress={handleConfirmTelebirr} style={{ marginTop: 12 }}>
+                      <LinearGradient colors={['#00e676', '#00a855']} style={styles.storeBtnInner}>
+                        <Ionicons name="checkmark-done-circle" size={24} color="#111" />
+                        <Text style={[styles.storeBtnText, { color: '#111', fontWeight: 'bold' }]}>{t.confirmTelebirrPayment}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               )}
 
               {/* STEP 3: MANUAL TRANSFER INSTRUCTIONS */}
@@ -1160,9 +1354,54 @@ const renderStore = () => {
                 </View>
               )}
 
-              {/* STEP 5: SETTINGS */}
+              {/* STEP 5: SETTINGS (VENUE TELEBIRR & CHAPA) */}
               {paymentStep === 'settings' && (
-                <KeyboardAvoidingView behavior="padding" style={{ paddingVertical: 10 }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10, paddingBottom: 25 }}>
+                  <Text style={styles.settingsSectionTitle}>{t.telebirrSettingsHeader}</Text>
+
+                  <Text style={styles.settingsLabel}>{t.merchantCode}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={tbMerchantInput}
+                    onChangeText={setTbMerchantInput}
+                    placeholder="991122"
+                    placeholderTextColor="#556"
+                    keyboardType="number-pad"
+                  />
+
+                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>{t.phoneNum}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={tbPhoneInput}
+                    onChangeText={setTbPhoneInput}
+                    placeholder="0911223344"
+                    placeholderTextColor="#556"
+                    keyboardType="phone-pad"
+                  />
+
+                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>{t.receiverName}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={tbNameInput}
+                    onChangeText={setTbNameInput}
+                    placeholder="Kotariw Game Co."
+                    placeholderTextColor="#556"
+                  />
+
+                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>{t.cbeAccountNum}:</Text>
+                  <TextInput
+                    style={styles.settingsInput}
+                    value={cbeAccountInput}
+                    onChangeText={setCbeAccountInput}
+                    placeholder="1000123456789"
+                    placeholderTextColor="#556"
+                    keyboardType="number-pad"
+                  />
+
+                  <View style={{ height: 1, backgroundColor: '#334', marginVertical: 18 }} />
+
+                  <Text style={styles.settingsSectionTitle}>{t.chapaSettingsHeader}</Text>
+
                   <Text style={styles.settingsLabel}>{t.publicKey}:</Text>
                   <TextInput
                     style={styles.settingsInput}
@@ -1173,7 +1412,7 @@ const renderStore = () => {
                     autoCapitalize="none"
                   />
 
-                  <Text style={[styles.settingsLabel, { marginTop: 15 }]}>{t.secretKey}:</Text>
+                  <Text style={[styles.settingsLabel, { marginTop: 12 }]}>{t.secretKey}:</Text>
                   <TextInput
                     style={styles.settingsInput}
                     value={secKeyInput}
@@ -1184,13 +1423,13 @@ const renderStore = () => {
                     autoCapitalize="none"
                   />
 
-                  <TouchableOpacity onPress={handleSaveChapaKeys} style={{ marginTop: 30 }}>
+                  <TouchableOpacity onPress={handleSaveAllSettings} style={{ marginTop: 24 }}>
                     <LinearGradient colors={['#ffcc00', '#e6a800']} style={styles.storeBtnInner}>
                       <Ionicons name="save" size={22} color="#111" />
-                      <Text style={styles.storeBtnText}>{t.saveSettings}</Text>
+                      <Text style={[styles.storeBtnText, { color: '#111', fontWeight: 'bold' }]}>{t.saveSettings}</Text>
                     </LinearGradient>
                   </TouchableOpacity>
-                </KeyboardAvoidingView>
+                </ScrollView>
               )}
 
             </LinearGradient>
@@ -3066,5 +3305,153 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#334',
     fontSize: 14,
+  },
+  settingsSectionTitle: {
+    color: '#00cfff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    letterSpacing: 0.5,
+  },
+  tbAmountBanner: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,174,239,0.4)',
+  },
+  tbAmountText: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  tbCoinSub: {
+    color: '#00cfff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  tbScanInstr: {
+    color: '#ccc',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 14,
+    lineHeight: 18,
+  },
+  tbQrWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  tbQrCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 14,
+    alignItems: 'center',
+    shadowColor: '#0072bc',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 8,
+    borderWidth: 2,
+    borderColor: '#00AEEF',
+  },
+  tbQrImage: {
+    width: 210,
+    height: 210,
+    borderRadius: 8,
+  },
+  tbQrFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 6,
+  },
+  tbQrFooterText: {
+    color: '#0072bc',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  tbDetailsBox: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#334',
+    marginBottom: 14,
+  },
+  tbDetailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  tbDetailLabel: {
+    color: '#889',
+    fontSize: 13,
+  },
+  tbDetailVal: {
+    color: '#eee',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tbDetailValHighlight: {
+    color: '#00cfff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  tbDetailDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    marginVertical: 4,
+  },
+  tbActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  tbActionBtn: {
+    flex: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  tbActionBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+    gap: 6,
+  },
+  tbActionBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  tbConfirmBox: {
+    backgroundColor: 'rgba(0,230,118,0.06)',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,230,118,0.3)',
+  },
+  tbConfirmLabel: {
+    color: '#00e676',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  tbConfirmInput: {
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    color: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#334',
   },
 });
