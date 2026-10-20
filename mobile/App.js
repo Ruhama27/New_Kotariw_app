@@ -1736,7 +1736,8 @@ const renderStore = () => {
 
     const remainingCount = status.remaining_numbers ? status.remaining_numbers.length : 0;
     const playerKeys = Object.keys(status.players);
-    const isTwoPlayer = playerKeys.length === 2;
+    const playerCount = playerKeys.length;
+    const isTwoPlayer = playerCount === 2;
 
     return (
       <View style={styles.gameContainer}>
@@ -1745,8 +1746,8 @@ const renderStore = () => {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.gameScrollContent}
         >
-          {/* ── PLAYER SCORE CARDS (Image 2 + Image 1 Neon Cards) ── */}
-          <View style={styles.scoresWrap}>
+          {/* ── SLEEK COMPACT PLAYER SCOREBOARD ── */}
+          <View style={styles.compactScoresWrap}>
             {playerKeys.map((key, i) => {
               const p = Array.isArray(status.players) ? status.players[i] : status.players[key];
               const pId = Array.isArray(status.players) ? p.id : key;
@@ -1759,47 +1760,48 @@ const renderStore = () => {
                   activeOpacity={0.8}
                   onPress={() => handleSelectPlayerTurn(i)}
                   style={[
-                    styles.playerNeonCard,
-                    isActive ? styles.playerNeonCardActive : styles.playerNeonCardInactive,
-                    isTwoPlayer ? { flex: 1, marginHorizontal: 5 } : { width: '48%', marginBottom: 10 }
+                    styles.playerCompactCard,
+                    isActive ? styles.playerCompactCardActive : styles.playerCompactCardInactive,
+                    playerCount === 2 ? { flex: 1, marginHorizontal: 4 } :
+                    playerCount === 3 ? { flex: 1, marginHorizontal: 3 } :
+                    { width: '48%', marginHorizontal: '1%', marginBottom: 6 }
                   ]}
                 >
-                  {/* Turn indicator badge */}
-                  <View style={isActive ? styles.turnBadgeActive : styles.turnBadgeInactive}>
-                    <Text style={isActive ? styles.turnBadgeActiveText : styles.turnBadgeInactiveText}>
-                      {isActive ? `● ${t.yourTurn || 'YOUR TURN'}` : (t.waitingTurn || 'WAITING')}
-                    </Text>
-                  </View>
-
-                  {/* Player identity row */}
-                  <View style={styles.playerCardHeader}>
-                    <View style={[styles.playerAvatarCircle, isActive && styles.playerAvatarCircleActive]}>
-                      <Text style={[styles.playerAvatarLetter, isActive && { color: '#00f2fe' }]}>
+                  {/* Card Top: Status Dot + Avatar + Name + Mini Turn Pill */}
+                  <View style={styles.compactCardTopRow}>
+                    <View style={[styles.compactStatusDot, isActive ? styles.compactStatusDotActive : styles.compactStatusDotInactive]} />
+                    <View style={[styles.compactAvatarCircle, isActive && styles.compactAvatarCircleActive]}>
+                      <Text style={[styles.compactAvatarLetter, isActive && { color: '#00f2fe' }]}>
                         {pId.charAt(0).toUpperCase()}
                       </Text>
                     </View>
                     <Text
                       numberOfLines={1}
-                      style={[styles.playerNameText, isActive ? styles.playerNameActive : styles.playerNameInactive]}
+                      style={[styles.compactPlayerName, isActive ? styles.compactPlayerNameActive : styles.compactPlayerNameInactive]}
                     >
                       {pId.toUpperCase()}
                     </Text>
+                    {isActive && (
+                      <View style={styles.compactTurnPill}>
+                        <Text style={styles.compactTurnPillText}>TURN</Text>
+                      </View>
+                    )}
                   </View>
 
-                  {/* Digital Score */}
-                  <Text style={[styles.playerScoreDisplay, isActive ? styles.scoreActiveText : styles.scoreInactiveText]}>
-                    {pScore}
-                  </Text>
-
-                  {/* Pocketed Mini Balls */}
-                  <View style={styles.miniBallsRow}>
-                    {p.history && p.history.length > 0 ? (
-                      p.history.slice(-5).map((item, idx) => (
-                        <MiniatureBall key={idx} item={item} />
-                      ))
-                    ) : (
-                      <Text style={styles.noPocketedText}>- - -</Text>
-                    )}
+                  {/* Card Body: Digital Score + Pocketed Mini Balls */}
+                  <View style={styles.compactCardBody}>
+                    <Text style={[styles.compactScoreText, isActive ? styles.compactScoreTextActive : styles.compactScoreTextInactive]}>
+                      {pScore}
+                    </Text>
+                    <View style={styles.compactMiniBallsRow}>
+                      {p.history && p.history.length > 0 ? (
+                        p.history.slice(-3).map((item, idx) => (
+                          <MiniatureBall key={idx} item={item} />
+                        ))
+                      ) : (
+                        <Text style={styles.compactNoBallsText}>-</Text>
+                      )}
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -1968,61 +1970,117 @@ const renderStore = () => {
             </View>
           </View>
 
-          {/* ── PRIMARY NEON ACTION BUTTONS (Image 2 style) ── */}
+          {/* ── HIGH-QUALITY TACTILE ACTION BUTTONS (Image 1 improved) ── */}
           <View style={styles.primaryActionRow}>
+            {/* SCORE / ADD BUTTON */}
             <TouchableOpacity
-              style={styles.neonBtnAdd}
+              style={styles.actionBtnWrap}
               onPress={() => sendAction('add')}
-              activeOpacity={0.8}
+              activeOpacity={0.82}
             >
-              <Ionicons name="add" size={26} color="#00e676" />
-              <Text style={styles.neonBtnAddText}>+ {t.point || 'POINT'}</Text>
+              <LinearGradient
+                colors={selectedBall ? ['#00e676', '#00b050', '#007a38'] : ['#00c853', '#00873a', '#005a27']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.actionBtnGrad, styles.actionBtnGradAdd, selectedBall && styles.actionBtnGradActiveAdd]}
+              >
+                <View style={styles.actionBtnShine} />
+                <View style={styles.actionBtnIconBadgeAdd}>
+                  <Ionicons name="add" size={22} color="#003b17" />
+                </View>
+                <View style={styles.actionBtnTextWrap}>
+                  <Text style={styles.actionBtnTitleAdd}>
+                    {selectedBall ? `SCORE +${selectedBall}` : (t.add || 'SCORE')}
+                  </Text>
+                  <Text style={styles.actionBtnSubAdd}>
+                    {selectedBall ? `Ball ${selectedBall} Sunk` : `+ ${t.point || 'POINT'}`}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(0,59,23,0.6)" />
+              </LinearGradient>
             </TouchableOpacity>
 
+            {/* PENALTY / SUBTRACT BUTTON */}
             <TouchableOpacity
-              style={styles.neonBtnSubtract}
+              style={styles.actionBtnWrap}
               onPress={() => sendAction('subtract')}
-              activeOpacity={0.8}
+              activeOpacity={0.82}
             >
-              <Ionicons name="remove" size={26} color="#ff3366" />
-              <Text style={styles.neonBtnSubtractText}>- {t.point || 'POINT'}</Text>
+              <LinearGradient
+                colors={selectedBall ? ['#ff1744', '#d50000', '#8b0000'] : ['#d50000', '#9b0000', '#5e0000']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.actionBtnGrad, styles.actionBtnGradSub, selectedBall && styles.actionBtnGradActiveSub]}
+              >
+                <View style={styles.actionBtnShine} />
+                <View style={styles.actionBtnIconBadgeSub}>
+                  <Ionicons name="remove" size={22} color="#fff" />
+                </View>
+                <View style={styles.actionBtnTextWrap}>
+                  <Text style={styles.actionBtnTitleSub}>
+                    {selectedBall ? `PENALTY -${selectedBall}` : (t.penalize || 'PENALIZE')}
+                  </Text>
+                  <Text style={styles.actionBtnSubSub}>
+                    {selectedBall ? `Foul on Ball ${selectedBall}` : `- ${t.point || 'POINT'}`}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.6)" />
+              </LinearGradient>
             </TouchableOpacity>
           </View>
 
-          {/* ── SECONDARY PILL CONTROLS (Image 2 style: UNDO, PASS TURN, QUIT) ── */}
+          {/* ── HIGH-QUALITY SECONDARY PILL CONTROLS (UNDO, PASS TURN, QUIT) ── */}
           <View style={styles.secondaryControlsRow}>
+            {/* UNDO BUTTON */}
             <TouchableOpacity
-              style={[styles.secPillBtn, !status.can_undo && styles.secPillBtnDisabled]}
+              style={styles.secPillBtnWrap}
               onPress={handleUndo}
               disabled={!status.can_undo}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <Ionicons name="arrow-undo" size={15} color={status.can_undo ? '#ffcc00' : '#4b5563'} />
-              <Text style={[styles.secPillText, { color: status.can_undo ? '#ffcc00' : '#4b5563' }]}>
-                {' '}{t.undo || 'UNDO'}
-              </Text>
+              <LinearGradient
+                colors={status.can_undo ? ['#3d2e00', '#241a00'] : ['#16181f', '#0f1015']}
+                style={[styles.secPillGrad, status.can_undo ? styles.secPillUndoActive : styles.secPillDisabled]}
+              >
+                <Ionicons name="arrow-undo" size={15} color={status.can_undo ? '#ffcc00' : '#4b5563'} />
+                <Text style={[styles.secPillText, { color: status.can_undo ? '#ffcc00' : '#4b5563' }]}>
+                  {t.undo || 'UNDO'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
 
+            {/* PASS TURN BUTTON */}
             <TouchableOpacity
-              style={styles.secPillBtn}
+              style={styles.secPillBtnWrap}
               onPress={handlePassTurn}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <Ionicons name="swap-horizontal" size={15} color="#00f2fe" />
-              <Text style={[styles.secPillText, { color: '#00f2fe' }]}>
-                {' '}{t.passTurn || 'PASS TURN'}
-              </Text>
+              <LinearGradient
+                colors={['#00334d', '#001a26']}
+                style={[styles.secPillGrad, styles.secPillPassActive]}
+              >
+                <Ionicons name="swap-horizontal" size={16} color="#00f2fe" />
+                <Text style={[styles.secPillText, { color: '#00f2fe' }]}>
+                  {t.passTurn || 'PASS TURN'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
 
+            {/* QUIT BUTTON */}
             <TouchableOpacity
-              style={styles.secPillBtn}
+              style={styles.secPillBtnWrap}
               onPress={handleQuitGame}
-              activeOpacity={0.7}
+              activeOpacity={0.75}
             >
-              <Ionicons name="exit-outline" size={15} color="#ff4444" />
-              <Text style={[styles.secPillText, { color: '#ff4444' }]}>
-                {' '}{t.quit || 'QUIT'}
-              </Text>
+              <LinearGradient
+                colors={['#381119', '#20080d']}
+                style={[styles.secPillGrad, styles.secPillQuitActive]}
+              >
+                <Ionicons name="exit-outline" size={15} color="#ff5252" />
+                <Text style={[styles.secPillText, { color: '#ff5252' }]}>
+                  {t.quit || 'QUIT'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -3463,5 +3521,256 @@ const styles = StyleSheet.create({
     fontSize: 14,
     borderWidth: 1,
     borderColor: '#334',
+  },
+
+  // ── Sleek Compact Player Scoreboard (Image 2 improved) ──
+  compactScoresWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  playerCompactCard: {
+    borderRadius: 12,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderWidth: 1.5,
+    minHeight: 70,
+    justifyContent: 'space-between',
+  },
+  playerCompactCardActive: {
+    backgroundColor: 'rgba(10, 26, 47, 0.95)',
+    borderColor: '#00f2fe',
+    shadowColor: '#00f2fe',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  playerCompactCardInactive: {
+    backgroundColor: 'rgba(16, 22, 34, 0.7)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  compactCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  compactStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  compactStatusDotActive: {
+    backgroundColor: '#00f2fe',
+  },
+  compactStatusDotInactive: {
+    backgroundColor: '#475569',
+  },
+  compactAvatarCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 4,
+    borderWidth: 1,
+    borderColor: '#374151',
+  },
+  compactAvatarCircleActive: {
+    borderColor: '#00f2fe',
+    backgroundColor: 'rgba(0, 242, 254, 0.15)',
+  },
+  compactAvatarLetter: {
+    color: '#94a3b8',
+    fontSize: 9,
+    fontWeight: 'bold',
+  },
+  compactPlayerName: {
+    fontSize: 11,
+    fontWeight: '800',
+    flex: 1,
+    letterSpacing: 0.6,
+  },
+  compactPlayerNameActive: {
+    color: '#00f2fe',
+  },
+  compactPlayerNameInactive: {
+    color: '#94a3b8',
+  },
+  compactTurnPill: {
+    backgroundColor: '#00f2fe',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+    marginLeft: 2,
+  },
+  compactTurnPillText: {
+    color: '#070e1b',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  compactCardBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  compactScoreText: {
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  compactScoreTextActive: {
+    color: '#ffffff',
+    textShadowColor: 'rgba(0, 242, 254, 0.4)',
+    textShadowRadius: 6,
+  },
+  compactScoreTextInactive: {
+    color: '#64748b',
+  },
+  compactMiniBallsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  compactNoBallsText: {
+    color: '#334155',
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+
+  // ── High Quality Action Buttons (Image 1 improved) ──
+  actionBtnWrap: {
+    flex: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginHorizontal: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  actionBtnGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 11,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    position: 'relative',
+  },
+  actionBtnGradAdd: {
+    borderColor: '#69f0ae',
+  },
+  actionBtnGradActiveAdd: {
+    borderColor: '#ffffff',
+    shadowColor: '#00e676',
+    shadowRadius: 10,
+    shadowOpacity: 0.9,
+    elevation: 8,
+  },
+  actionBtnGradSub: {
+    borderColor: '#ff5252',
+  },
+  actionBtnGradActiveSub: {
+    borderColor: '#ffffff',
+    shadowColor: '#ff1744',
+    shadowRadius: 10,
+    shadowOpacity: 0.9,
+    elevation: 8,
+  },
+  actionBtnShine: {
+    position: 'absolute',
+    top: 0,
+    left: 8,
+    right: 8,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  actionBtnIconBadgeAdd: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  actionBtnIconBadgeSub: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  actionBtnTextWrap: {
+    flex: 1,
+  },
+  actionBtnTitleAdd: {
+    color: '#03260f',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  actionBtnSubAdd: {
+    color: 'rgba(3, 38, 15, 0.75)',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  actionBtnTitleSub: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
+  actionBtnSubSub: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+
+  // ── Secondary Controls Pill Buttons ──
+  secPillBtnWrap: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginHorizontal: 3,
+  },
+  secPillGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 4,
+  },
+  secPillUndoActive: {
+    borderColor: 'rgba(255, 204, 0, 0.45)',
+  },
+  secPillPassActive: {
+    borderColor: 'rgba(0, 242, 254, 0.45)',
+  },
+  secPillQuitActive: {
+    borderColor: 'rgba(255, 82, 82, 0.45)',
+  },
+  secPillDisabled: {
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
 });
