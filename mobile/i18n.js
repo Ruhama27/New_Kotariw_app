@@ -177,6 +177,15 @@ export const translations = {
     soundOffText: 'OFF',
     languageSetting: 'Language / ቋንቋ',
     currentLangName: 'English (EN)',
+    kotariwBirrCalculation: 'KOTARIW BIRR CALCULATION',
+    winnerPayout: 'Winner (Birr)',
+    kotariwFee: 'Kotariw (Birr)',
+    tableFeeBirr: 'Table (Birr)',
+    payoutBalanced: '✓ Balanced (100% Allocated)',
+    remainingToAllocate: 'Birr remaining',
+    overPot: 'Birr over total pot',
+    autoBalance: 'Auto-Balance',
+    payoutMismatchTitle: 'Birr Calculation Mismatch',
   },
   am: {
     // Home
@@ -356,5 +365,14 @@ export const translations = {
     soundOffText: 'ጠፍቷል',
     languageSetting: 'ቋንቋ / Language',
     currentLangName: 'አማርኛ (አማ)',
+    kotariwBirrCalculation: 'የኮታሪው የብር ስሌት',
+    winnerPayout: 'የአሸናፊ ክፍያ (ብር)',
+    kotariwFee: 'የኮታሪው ድርሻ (ብር)',
+    tableFeeBirr: 'የጠረጴዛ ክፍያ (ብር)',
+    payoutBalanced: '✓ ተስተካክሏል (100%)',
+    remainingToAllocate: 'ብር ቀሪ አለ',
+    overPot: 'ብር ከጠቅላላው ድምር በልጧል',
+    autoBalance: 'ራሱን አስተካክል',
+    payoutMismatchTitle: 'የክፍያ ስሌት አለመመሳሰል',
   }
 };

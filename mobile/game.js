@@ -4,13 +4,20 @@ export class GameEngine {
         this.player_count = playersData.length;
         this.total_pot = playersData.reduce((sum, p) => sum + Number(p.bet), 0);
         
-        const wPct = Number(pricingOptions.pctWinner !== undefined ? pricingOptions.pctWinner : 80) / 100;
-        const tPct = Number(pricingOptions.pctTable !== undefined ? pricingOptions.pctTable : 0) / 100;
-        const kPct = Number(pricingOptions.pctKotariw !== undefined ? pricingOptions.pctKotariw : 20) / 100;
+        // Kotariw sets direct Birr calculation amounts
+        if (pricingOptions && (pricingOptions.payoutWinner !== undefined || pricingOptions.prizeWinner !== undefined)) {
+            this.prize_winner = Number(pricingOptions.payoutWinner ?? pricingOptions.prizeWinner);
+            this.prize_table = Number(pricingOptions.payoutTable ?? pricingOptions.prizeTable ?? 0);
+            this.prize_kotariw = Number(pricingOptions.payoutKotariw ?? pricingOptions.prizeKotariw ?? 0);
+        } else {
+            const wPct = Number(pricingOptions.pctWinner !== undefined ? pricingOptions.pctWinner : 80) / 100;
+            const tPct = Number(pricingOptions.pctTable !== undefined ? pricingOptions.pctTable : 0) / 100;
+            const kPct = Number(pricingOptions.pctKotariw !== undefined ? pricingOptions.pctKotariw : 20) / 100;
 
-        this.prize_winner = this.total_pot * wPct;
-        this.prize_table = this.total_pot * tPct;
-        this.prize_kotariw = this.total_pot * kPct;
+            this.prize_winner = this.total_pot * wPct;
+            this.prize_table = this.total_pot * tPct;
+            this.prize_kotariw = this.total_pot * kPct;
+        }
         
         this.valid_numbers = [3,4,5,6,7,8,9,10,11,12,13,14,15];
         this.used_numbers = [];

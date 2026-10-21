@@ -172,6 +172,10 @@ export default function App() {
 
   // Setup State
   const [playerCount, setPlayerCount] = useState(2);
+  // Kotariw Direct Birr Calculation States (configured in Lobby Setup)
+  const [payoutWinner, setPayoutWinner] = useState('80');
+  const [payoutKotariw, setPayoutKotariw] = useState('20');
+  const [payoutTable, setPayoutTable] = useState('0');
   const [playersData, setPlayersData] = useState([
     { name: '', bet: '50' },
     { name: '', bet: '50' }
@@ -460,18 +464,40 @@ export default function App() {
   };
 
   const handlePlayerCountChange = (count) => {
+    triggerHaptic('light');
     setPlayerCount(count);
     const newData = [];
     for (let i = 0; i < count; i++) {
        newData.push(playersData[i] || { name: '', bet: '50' });
     }
     setPlayersData(newData);
+    const newPot = newData.reduce((sum, p) => sum + (Number(p.bet) || 0), 0);
+    const defKotariw = Math.round(newPot * 0.20);
+    setPayoutWinner(String(newPot - defKotariw));
+    setPayoutKotariw(String(defKotariw));
+    setPayoutTable('0');
   };
 
   const updatePlayerData = (index, field, value) => {
     const newData = [...playersData];
     newData[index][field] = value;
     setPlayersData(newData);
+    if (field === 'bet') {
+      const newPot = newData.reduce((sum, p) => sum + (Number(p.bet) || 0), 0);
+      const defKotariw = Math.round(newPot * 0.20);
+      setPayoutWinner(String(newPot - defKotariw));
+      setPayoutKotariw(String(defKotariw));
+      setPayoutTable('0');
+    }
+  };
+
+  const autoBalancePayout = () => {
+    triggerHaptic('medium');
+    const tot = playersData.reduce((sum, p) => sum + (Number(p.bet) || 0), 0);
+    const k = Number(payoutKotariw) || 0;
+    const t = Number(payoutTable) || 0;
+    const w = Math.max(0, tot - k - t);
+    setPayoutWinner(String(w));
   };
 
   const openPlayerPicker = (index) => {
@@ -520,13 +546,49 @@ export default function App() {
     // Save session config details to persist operator/table fields
     await saveSessionState(sessionGamesCount, sessionTotalPot, operator, tableNumber);
 
-    const engine = new GameEngine(playersData, { pctWinner, pctTable, pctKotariw });
-    setGameEngine(engine);
-    setWinner(null);
-    setStatus(engine.getStatus());
-    setGameStartTime(getFormattedTime());
-    setSetupVisible(false);
-    setCurrentScreen('GAME');
+    const totPot = playersData.reduce((sum, p) => sum + (Number(p.bet) || 0), 0);
+    const wBirr = Number(payoutWinner) || 0;
+    const kBirr = Number(payoutKotariw) || 0;
+    const tBirr = Number(payoutTable) || 0;
+
+    const launchGameWithBirr = (w, k, t) => {
+      const engine = new GameEngine(playersData, { 
+        payoutWinner: w, 
+        payoutKotariw: k, 
+        payoutTable: t,
+        pctWinner: totPot > 0 ? (w / totPot * 100) : 0,
+        pctTable: totPot > 0 ? (t / totPot * 100) : 0,
+        pctKotariw: totPot > 0 ? (k / totPot * 100) : 0
+      });
+      setGameEngine(engine);
+      setWinner(null);
+      setStatus(engine.getStatus());
+      setGameStartTime(getFormattedTime());
+      setSetupVisible(false);
+      setCurrentScreen('GAME');
+    };
+
+    if (wBirr + kBirr + tBirr !== totPot) {
+      triggerHaptic('heavy');
+      Alert.alert(
+        t.payoutMismatchTitle || 'Birr Calculation Mismatch',
+        `Winner (${wBirr} Birr) + Kotariw (${kBirr} Birr) + Table (${tBirr} Birr) = ${wBirr + kBirr + tBirr} Birr.\n\nTotal Pot collected is ${totPot} Birr.\n\nWould you like to auto-balance the remainder to the winner (${Math.max(0, totPot - kBirr - tBirr)} Birr)?`,
+        [
+          { text: t.cancel || 'Edit', style: 'cancel' },
+          {
+            text: t.autoBalance || 'Auto-Balance & Start',
+            onPress: () => {
+              const autoW = Math.max(0, totPot - kBirr - tBirr);
+              setPayoutWinner(String(autoW));
+              launchGameWithBirr(autoW, kBirr, tBirr);
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    launchGameWithBirr(wBirr, kBirr, tBirr);
   };
 
   const sendAction = (actionType) => {
@@ -1671,6 +1733,107 @@ const renderStore = () => {
                   ))}
                 </View>
 
+                {/* ── KOTARIW DIRECT BIRR CALCULATION CARD ── */}
+                {(() => {
+                  const calcTotalPot = playersData.reduce((sum, p) => sum + (Number(p.bet) || 0), 0);
+                  const currentAllocated = (Number(payoutWinner) || 0) + (Number(payoutKotariw) || 0) + (Number(payoutTable) || 0);
+                  const payoutRemainder = calcTotalPot - currentAllocated;
+                  const isPayoutBalanced = currentAllocated === calcTotalPot;
+
+                  return (
+                    <View style={styles.payoutCardContainer}>
+                      <View style={styles.payoutCardHeader}>
+                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                          <Ionicons name="calculator" size={16} color="#ffcc00" style={{ marginRight: 6 }} />
+                          <Text style={styles.payoutCardTitle}>{t.kotariwBirrCalculation || 'KOTARIW BIRR CALCULATION'}</Text>
+                        </View>
+                        <View style={styles.totalPotBadge}>
+                          <Text style={styles.totalPotBadgeText}>
+                            {t.pot || 'POT'}: <Text style={{ color: '#FFD700', fontWeight: '900' }}>{calcTotalPot} Birr</Text>
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* 3 Direct Birr Inputs */}
+                      <View style={styles.payoutInputsRow}>
+                        {/* Winner Share */}
+                        <View style={styles.payoutInputCol}>
+                          <Text style={styles.payoutInputLabel}>🥇 {t.winnerShare || 'Winner'}</Text>
+                          <View style={styles.payoutFieldWrap}>
+                            <TextInput
+                              style={styles.payoutInputField}
+                              value={payoutWinner}
+                              onChangeText={setPayoutWinner}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#667"
+                            />
+                            <Text style={styles.payoutCurr}>Birr</Text>
+                          </View>
+                        </View>
+
+                        {/* Kotariw Fee */}
+                        <View style={styles.payoutInputCol}>
+                          <Text style={styles.payoutInputLabel}>🏠 {t.kotariwShare || 'Kotariw'}</Text>
+                          <View style={styles.payoutFieldWrap}>
+                            <TextInput
+                              style={styles.payoutInputField}
+                              value={payoutKotariw}
+                              onChangeText={setPayoutKotariw}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#667"
+                            />
+                            <Text style={styles.payoutCurr}>Birr</Text>
+                          </View>
+                        </View>
+
+                        {/* Table Fee */}
+                        <View style={styles.payoutInputCol}>
+                          <Text style={styles.payoutInputLabel}>🎱 {t.tableShare || 'Table'}</Text>
+                          <View style={styles.payoutFieldWrap}>
+                            <TextInput
+                              style={styles.payoutInputField}
+                              value={payoutTable}
+                              onChangeText={setPayoutTable}
+                              keyboardType="numeric"
+                              placeholder="0"
+                              placeholderTextColor="#667"
+                            />
+                            <Text style={styles.payoutCurr}>Birr</Text>
+                          </View>
+                        </View>
+                      </View>
+
+                      {/* Live Allocation Balance Indicator */}
+                      <View style={styles.payoutBalanceRow}>
+                        {isPayoutBalanced ? (
+                          <View style={styles.balancedPill}>
+                            <Ionicons name="checkmark-circle" size={14} color="#00e676" style={{ marginRight: 4 }} />
+                            <Text style={styles.balancedText}>{t.payoutBalanced || '✓ 100% Allocated'}</Text>
+                          </View>
+                        ) : (
+                          <View style={styles.unbalancedPill}>
+                            <Ionicons name="alert-circle" size={14} color={payoutRemainder > 0 ? '#ffb300' : '#ff4444'} style={{ marginRight: 4 }} />
+                            <Text style={[styles.unbalancedText, { color: payoutRemainder > 0 ? '#ffb300' : '#ff4444' }]}>
+                              {payoutRemainder > 0 
+                                ? `${payoutRemainder} ${t.remainingToAllocate || 'Birr remaining'}`
+                                : `${Math.abs(payoutRemainder)} ${t.overPot || 'Birr over pot'}`}
+                            </Text>
+                          </View>
+                        )}
+
+                        {!isPayoutBalanced && (
+                          <TouchableOpacity style={styles.autoBalanceBtn} onPress={autoBalancePayout} activeOpacity={0.75}>
+                            <Ionicons name="flash" size={12} color="#00f2fe" style={{ marginRight: 4 }} />
+                            <Text style={styles.autoBalanceBtnText}>{t.autoBalance || 'Auto-Balance'}</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })()}
+
                 <TouchableOpacity style={styles.startBtnOuter} onPress={startGame}>
                   <LinearGradient colors={['#ffcc00', '#e6a800']} style={styles.startBtnInner}>
                      <Text style={styles.startBtnText}>{t.startMatch}</Text>
@@ -1742,19 +1905,19 @@ const renderStore = () => {
                 </View>
                 
                 <View style={styles.finRow}>
-                  <Text style={styles.finLabel}>🥇 {t.winnerShare} ({pctWinner}%):</Text>
+                  <Text style={styles.finLabel}>🥇 {t.winnerShare}:</Text>
                   <Text style={styles.finValue}>{winner.prize_winner.toFixed(0)} Birr</Text>
                 </View>
 
-                {pctTable > 0 && (
+                {winner.prize_table > 0 && (
                   <View style={styles.finRow}>
-                    <Text style={styles.finLabel}>🎱 {t.tableShare} ({pctTable}%):</Text>
+                    <Text style={styles.finLabel}>🎱 {t.tableShare}:</Text>
                     <Text style={styles.finValue}>{winner.prize_table.toFixed(0)} Birr</Text>
                   </View>
                 )}
                 
                 <View style={styles.finRow}>
-                  <Text style={styles.finLabel}>🏠 {t.kotariwShare} ({pctKotariw}%):</Text>
+                  <Text style={styles.finLabel}>🏠 {t.kotariwShare}:</Text>
                   <Text style={styles.finValue}>{winner.prize_kotariw.toFixed(0)} Birr</Text>
                 </View>
               </LinearGradient>
@@ -3142,6 +3305,131 @@ const styles = StyleSheet.create({
   menuToggleBadgeSoundInactive: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  payoutCardContainer: {
+    backgroundColor: 'rgba(16, 24, 40, 0.75)',
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 204, 0, 0.3)',
+  },
+  payoutCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  payoutCardTitle: {
+    color: '#ffcc00',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  totalPotBadge: {
+    backgroundColor: 'rgba(255, 215, 0, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FFD700',
+  },
+  totalPotBadgeText: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  payoutInputsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  payoutInputCol: {
+    flex: 1,
+    marginHorizontal: 3,
+  },
+  payoutInputLabel: {
+    color: '#cbd5e1',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  payoutFieldWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0a0d16',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  payoutInputField: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '900',
+    textAlign: 'center',
+    padding: 0,
+  },
+  payoutCurr: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 2,
+  },
+  payoutBalanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  balancedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 230, 118, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 230, 118, 0.3)',
+  },
+  balancedText: {
+    color: '#00e676',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  unbalancedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 68, 68, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 68, 68, 0.3)',
+  },
+  unbalancedText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  autoBalanceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 242, 254, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#00f2fe',
+  },
+  autoBalanceBtnText: {
+    color: '#00f2fe',
+    fontSize: 11,
+    fontWeight: '900',
   },
   menuToggleBadgeSoundText: {
     fontSize: 11,

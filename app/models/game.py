@@ -2,13 +2,20 @@
 from typing import List, Optional, Dict, Any
 
 class Game:
-    def __init__(self, player_count: int, buy_in: float = 0.0):
+    def __init__(self, player_count: int, buy_in: float = 0.0, prize_winner: Optional[float] = None, prize_kotariw: Optional[float] = None, prize_table: Optional[float] = None):
         self.player_count = player_count
         self.buy_in = buy_in
         self.total_pot = buy_in * player_count
-        self.prize_winner = self.total_pot * 0.70
-        self.prize_kotariw = self.total_pot * 0.20
-        self.prize_game = self.total_pot * 0.10
+        if prize_winner is not None:
+            self.prize_winner = float(prize_winner)
+            self.prize_kotariw = float(prize_kotariw or 0.0)
+            self.prize_table = float(prize_table or 0.0)
+            self.prize_game = 0.0
+        else:
+            self.prize_winner = self.total_pot * 0.70
+            self.prize_kotariw = self.total_pot * 0.20
+            self.prize_table = 0.0
+            self.prize_game = self.total_pot * 0.10
         self.valid_numbers = list(range(3, 16))
         self.used_numbers = []
         self.game_over = False
