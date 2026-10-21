@@ -206,7 +206,6 @@ export default function App() {
 
   // Menu and Dashboard visibility states
   const [menuVisible, setMenuVisible] = useState(false);
-  const [dashboardVisible, setDashboardVisible] = useState(false);
 
   // Operator Profiles
   const [operatorProfiles, setOperatorProfiles] = useState([]);
@@ -1031,142 +1030,10 @@ export default function App() {
                 <Text style={styles.menuOptionText}>{t.operatorProfiles}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
-                style={styles.menuOptionRow} 
-                onPress={() => {
-                  triggerHaptic('light');
-                  setMenuVisible(false);
-                  setDashboardVisible(true);
-                }}
-              >
-                <Ionicons name="settings" size={24} color="#00e676" />
-                <Text style={styles.menuOptionText}>{t.kotariwDashboard}</Text>
-              </TouchableOpacity>
+
             </LinearGradient>
           </View>
         </TouchableOpacity>
-      </Modal>
-    );
-  };
-
-  const renderKotariwDashboardModal = () => {
-    const wVal = Number(winnerInput || 0);
-    const tVal = Number(tableInput || 0);
-    const kVal = Number(kotariwInput || 0);
-    const totalSum = wVal + tVal + kVal;
-    const isValid = totalSum === 100;
-
-    const handleSavePricing = async () => {
-      triggerHaptic('medium');
-      if (!isValid) {
-        Alert.alert(t.error, t.invalidPercentages);
-        return;
-      }
-      try {
-        setPctWinner(wVal);
-        setPctTable(tVal);
-        setPctKotariw(kVal);
-
-        await AsyncStorage.setItem('kotariw_pct_winner', winnerInput);
-        await AsyncStorage.setItem('kotariw_pct_table', tableInput);
-        await AsyncStorage.setItem('kotariw_pct_kotariw', kotariwInput);
-
-        playSound('payment_success'); // success chime
-        Alert.alert(t.kotariwDashboard, t.pricingSaved);
-        setDashboardVisible(false);
-      } catch (err) {
-        console.error(err);
-        Alert.alert(t.error, err.message);
-      }
-    };
-
-    return (
-      <Modal visible={dashboardVisible} animationType="slide" transparent={true}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalBg}
-        >
-          <View style={styles.modalContent}>
-            <LinearGradient colors={['#1a1a2e', '#0f0f1c']} style={styles.modalDarkGradient}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{t.kotariwDashboard}</Text>
-                <TouchableOpacity onPress={() => setDashboardVisible(false)}>
-                  <Ionicons name="close-circle" size={32} color="#ff4444" />
-                </TouchableOpacity>
-              </View>
-
-              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                <Text style={[styles.storeSubtitle, { marginBottom: 20 }]}>{t.pricingSettings}</Text>
-
-                {/* Winner Share Input */}
-                <View style={styles.dashboardInputRow}>
-                  <Text style={styles.dashboardInputLabel}>{t.winnerSharePct}:</Text>
-                  <TextInput
-                    style={styles.dashboardInput}
-                    value={winnerInput}
-                    onChangeText={setWinnerInput}
-                    keyboardType="numeric"
-                    maxLength={3}
-                  />
-                  <Text style={styles.dashboardPctSign}>%</Text>
-                </View>
-
-                {/* Table Share Input */}
-                <View style={styles.dashboardInputRow}>
-                  <Text style={styles.dashboardInputLabel}>{t.tableSharePct}:</Text>
-                  <TextInput
-                    style={styles.dashboardInput}
-                    value={tableInput}
-                    onChangeText={setTableInput}
-                    keyboardType="numeric"
-                    maxLength={3}
-                  />
-                  <Text style={styles.dashboardPctSign}>%</Text>
-                </View>
-
-                {/* Kotariw Share Input */}
-                <View style={styles.dashboardInputRow}>
-                  <Text style={styles.dashboardInputLabel}>{t.hostSharePct}:</Text>
-                  <TextInput
-                    style={styles.dashboardInput}
-                    value={kotariwInput}
-                    onChangeText={setKotariwInput}
-                    keyboardType="numeric"
-                    maxLength={3}
-                  />
-                  <Text style={styles.dashboardPctSign}>%</Text>
-                </View>
-
-                {/* Validation Indicator */}
-                <View style={[
-                  styles.dashboardValidationContainer, 
-                  { backgroundColor: isValid ? 'rgba(0, 230, 118, 0.12)' : 'rgba(255, 68, 68, 0.12)' }
-                ]}>
-                  <Text style={[
-                    styles.dashboardValidationText, 
-                    { color: isValid ? '#00e676' : '#ff4444' }
-                  ]}>
-                    {isValid 
-                      ? `Total: ${totalSum}% (${t.savePricing})` 
-                      : `Total: ${totalSum}% (${t.totalShareWarning})`
-                    }
-                  </Text>
-                </View>
-
-                {/* Save Button */}
-                <TouchableOpacity 
-                  style={[styles.startBtnOuter, { opacity: isValid ? 1 : 0.5 }]} 
-                  onPress={handleSavePricing}
-                  disabled={!isValid}
-                >
-                  <LinearGradient colors={['#00e676', '#00a855']} style={styles.startBtnInner}>
-                    <Text style={styles.startBtnText}>{t.savePricing}</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </ScrollView>
-            </LinearGradient>
-          </View>
-        </KeyboardAvoidingView>
       </Modal>
     );
   };
@@ -1620,7 +1487,7 @@ const renderStore = () => {
                   <Text style={styles.mainCardBallNum}>8</Text>
                 </View>
                 <Text style={[styles.mainCardTitle, { fontSize: 22 }]}>{t.playNow}</Text>
-                <Text style={styles.mainCardSub}>{t.multiplayer}</Text>
+                {t.multiplayer ? <Text style={styles.mainCardSub}>{t.multiplayer}</Text> : null}
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -2507,16 +2374,6 @@ const renderStore = () => {
 
       <TouchableOpacity
         style={styles.bottomNavItem}
-        onPress={() => { triggerHaptic('light'); setDashboardVisible(true); }}
-      >
-        <Ionicons name="stats-chart" size={22} color="#64748b" />
-        <Text style={styles.bottomNavText}>
-          {t.statsNavTab || 'Stats'}
-        </Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.bottomNavItem}
         onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}
       >
         <Ionicons name="settings" size={22} color="#64748b" />
@@ -2533,7 +2390,6 @@ const renderStore = () => {
       {currentScreen === 'GAME' && renderGame()}
       {currentScreen === 'HISTORY' && renderHistory()}
       {renderMenuModal()}
-      {renderKotariwDashboardModal()}
       {renderOperatorModal()}
       {currentScreen === 'HISTORY' && renderBottomNav()}
     </View>
