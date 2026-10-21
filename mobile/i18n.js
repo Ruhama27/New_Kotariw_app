@@ -172,6 +172,11 @@ export const translations = {
     historyNavTab: 'History',
     statsNavTab: 'Stats',
     settingsNavTab: 'Settings',
+    soundSetting: 'Sound Effects & Audio',
+    soundOnText: 'ON',
+    soundOffText: 'OFF',
+    languageSetting: 'Language / ቋንቋ',
+    currentLangName: 'English (EN)',
   },
   am: {
     // Home
@@ -346,5 +351,10 @@ export const translations = {
     historyNavTab: 'ታሪክ',
     statsNavTab: 'ስታቲስቲክስ',
     settingsNavTab: 'ቅንብሮች',
+    soundSetting: 'የድምፅ እና የኦዲዮ ውጤቶች',
+    soundOnText: 'በርቷል',
+    soundOffText: 'ጠፍቷል',
+    languageSetting: 'ቋንቋ / Language',
+    currentLangName: 'አማርኛ (አማ)',
   }
 };

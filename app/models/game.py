@@ -41,6 +41,8 @@ class Game:
 
     def calculate_score(self, number: int, is_two_player: bool = False) -> int:
         """Calculate score based on game rules"""
+        if number == 3:
+            return 6
         return number
 
     def add_score(self, player_id: str, number: int):

@@ -689,14 +689,8 @@ export default function App() {
       </View>
 
       <View style={styles.headerRightWrap}>
-        <TouchableOpacity style={styles.langBtn} onPress={toggleLang}>
-          <Text style={styles.langBtnText}>{t.language}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.langBtn} onPress={toggleSound}>
-          <Ionicons name={soundOn ? 'volume-high' : 'volume-mute'} size={18} color={soundOn ? '#00e676' : '#666'} />
-        </TouchableOpacity>
         <TouchableOpacity style={styles.gearBtn} onPress={() => { triggerHaptic('light'); setMenuVisible(true); }}>
-          <Ionicons name="settings-sharp" size={18} color="#00f2fe" />
+          <Ionicons name="settings-sharp" size={20} color="#00f2fe" />
         </TouchableOpacity>
       </View>
     </View>
@@ -909,6 +903,47 @@ export default function App() {
                   <Ionicons name="close-circle" size={30} color="#ff4444" />
                 </TouchableOpacity>
               </View>
+
+              {/* Language Selector in Settings */}
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('medium');
+                  toggleLang();
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="globe-outline" size={24} color="#00f2fe" />
+                <View style={{ flex: 1, marginLeft: 15 }}>
+                  <Text style={styles.menuOptionText}>{t.languageSetting || 'Language'}</Text>
+                  <Text style={styles.menuOptionSubText}>{t.currentLangName || (lang === 'en' ? 'English (EN)' : 'አማርኛ (አማ)')}</Text>
+                </View>
+                <View style={styles.menuToggleBadgeLang}>
+                  <Text style={styles.menuToggleBadgeLangText}>{t.language}</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Sound & Audio Toggle in Settings */}
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('medium');
+                  toggleSound();
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={soundOn ? 'volume-high' : 'volume-mute'} size={24} color={soundOn ? '#00e676' : '#ff4444'} />
+                <View style={{ flex: 1, marginLeft: 15 }}>
+                  <Text style={styles.menuOptionText}>{t.soundSetting || 'Sound Effects'}</Text>
+                  <Text style={styles.menuOptionSubText}>{soundOn ? (t.soundOnText || 'Sound ON') : (t.soundOffText || 'Sound OFF')}</Text>
+                </View>
+                <View style={[styles.menuToggleBadgeSound, soundOn ? styles.menuToggleBadgeSoundActive : styles.menuToggleBadgeSoundInactive]}>
+                  <Ionicons name={soundOn ? 'checkmark-circle' : 'close-circle'} size={14} color={soundOn ? '#00e676' : '#94a3b8'} style={{ marginRight: 4 }} />
+                  <Text style={[styles.menuToggleBadgeSoundText, soundOn ? { color: '#00e676' } : { color: '#94a3b8' }]}>
+                    {soundOn ? (t.soundOnText || 'ON') : (t.soundOffText || 'OFF')}
+                  </Text>
+                </View>
+              </TouchableOpacity>
 
               <TouchableOpacity 
                 style={styles.menuOptionRow} 
@@ -1955,10 +1990,10 @@ const renderStore = () => {
                 </View>
                 <View style={styles.actionBtnTextWrap}>
                   <Text style={styles.actionBtnTitleAdd}>
-                    {selectedBall ? `SCORE +${selectedBall}` : (t.add || 'SCORE')}
+                    {selectedBall ? `SCORE +${selectedBall === 3 ? 6 : selectedBall}` : (t.add || 'SCORE')}
                   </Text>
                   <Text style={styles.actionBtnSubAdd}>
-                    {selectedBall ? `Ball ${selectedBall} Sunk` : `+ ${t.point || 'POINT'}`}
+                    {selectedBall ? `Ball ${selectedBall} Sunk${selectedBall === 3 ? ' (6 pts)' : ''}` : `+ ${t.point || 'POINT'}`}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="rgba(0,59,23,0.6)" />
@@ -1983,10 +2018,10 @@ const renderStore = () => {
                 </View>
                 <View style={styles.actionBtnTextWrap}>
                   <Text style={styles.actionBtnTitleSub}>
-                    {selectedBall ? `PENALTY -${selectedBall}` : (t.penalize || 'PENALIZE')}
+                    {selectedBall ? `PENALTY -${selectedBall === 3 ? 6 : selectedBall}` : (t.penalize || 'PENALIZE')}
                   </Text>
                   <Text style={styles.actionBtnSubSub}>
-                    {selectedBall ? `Foul on Ball ${selectedBall}` : `- ${t.point || 'POINT'}`}
+                    {selectedBall ? `Foul on Ball ${selectedBall}${selectedBall === 3 ? ' (-6 pts)' : ''}` : `- ${t.point || 'POINT'}`}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.6)" />
@@ -2326,7 +2361,7 @@ const renderStore = () => {
       {renderMenuModal()}
       {renderKotariwDashboardModal()}
       {renderOperatorModal()}
-      {(currentScreen === 'GAME' || currentScreen === 'HISTORY') && renderBottomNav()}
+      {currentScreen === 'HISTORY' && renderBottomNav()}
     </View>
   );
 }
@@ -3076,7 +3111,43 @@ const styles = StyleSheet.create({
   menuBtn: { backgroundColor: 'rgba(0,0,0,0.55)', padding: 8, borderRadius: 20, borderWidth: 1, borderColor: '#fff' },
   menuModalContent: { width: '80%', borderRadius: 20, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.15)' },
   menuOptionRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 18, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' },
-  menuOptionText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginLeft: 15 },
+  menuOptionText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  menuOptionSubText: { color: 'rgba(255,255,255,0.5)', fontSize: 11, marginTop: 2, fontWeight: '600' },
+  menuToggleBadgeLang: {
+    backgroundColor: 'rgba(0, 242, 254, 0.12)',
+    borderWidth: 1,
+    borderColor: '#00f2fe',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  menuToggleBadgeLangText: {
+    color: '#00f2fe',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  menuToggleBadgeSound: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  menuToggleBadgeSoundActive: {
+    backgroundColor: 'rgba(0, 230, 118, 0.12)',
+    borderColor: '#00e676',
+  },
+  menuToggleBadgeSoundInactive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  menuToggleBadgeSoundText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
   dashboardInputRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 12, paddingHorizontal: 15, paddingVertical: 10, marginBottom: 15, borderWidth: 1, borderColor: '#334' },
   dashboardInputLabel: { color: '#aab', fontSize: 14, fontWeight: 'bold', flex: 2 },
   dashboardInput: { color: '#ffcc00', fontSize: 18, fontWeight: 'bold', textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 15, minWidth: 70, borderWidth: 1, borderColor: '#445' },

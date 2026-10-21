@@ -59,6 +59,7 @@ export class GameEngine {
     }
 
     calculateScore(number, isTwoPlayer) {
+        if (number === 3) return 6;
         return number;
     }
 
