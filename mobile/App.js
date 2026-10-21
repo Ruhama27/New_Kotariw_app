@@ -1742,10 +1742,13 @@ const renderStore = () => {
 
                   return (
                     <View style={styles.payoutCardContainer}>
+                      {/* Clean Header: Title on Left, Total Pot Pill on Right (No Overlap) */}
                       <View style={styles.payoutCardHeader}>
-                        <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                        <View style={styles.payoutTitleWrap}>
                           <Ionicons name="calculator" size={16} color="#ffcc00" style={{ marginRight: 6 }} />
-                          <Text style={styles.payoutCardTitle}>{t.kotariwBirrCalculation || 'KOTARIW BIRR CALCULATION'}</Text>
+                          <Text style={styles.payoutCardTitle} numberOfLines={1}>
+                            {t.kotariwBirrCalculation || 'KOTARIW CALCULATION'}
+                          </Text>
                         </View>
                         <View style={styles.totalPotBadge}>
                           <Text style={styles.totalPotBadgeText}>
@@ -1754,11 +1757,13 @@ const renderStore = () => {
                         </View>
                       </View>
 
-                      {/* 3 Direct Birr Inputs */}
+                      {/* 3 Perfectly Aligned Direct Birr Input Boxes */}
                       <View style={styles.payoutInputsRow}>
-                        {/* Winner Share */}
+                        {/* Winner */}
                         <View style={styles.payoutInputCol}>
-                          <Text style={styles.payoutInputLabel}>🥇 {t.winnerShare || 'Winner'}</Text>
+                          <Text style={styles.payoutInputLabel} numberOfLines={1}>
+                            🥇 {t.winnerShort || 'Winner'}
+                          </Text>
                           <View style={styles.payoutFieldWrap}>
                             <TextInput
                               style={styles.payoutInputField}
@@ -1772,9 +1777,11 @@ const renderStore = () => {
                           </View>
                         </View>
 
-                        {/* Kotariw Fee */}
+                        {/* Kotariw */}
                         <View style={styles.payoutInputCol}>
-                          <Text style={styles.payoutInputLabel}>🏠 {t.kotariwShare || 'Kotariw'}</Text>
+                          <Text style={styles.payoutInputLabel} numberOfLines={1}>
+                            🏠 {t.kotariwShort || 'Kotariw'}
+                          </Text>
                           <View style={styles.payoutFieldWrap}>
                             <TextInput
                               style={styles.payoutInputField}
@@ -1788,9 +1795,11 @@ const renderStore = () => {
                           </View>
                         </View>
 
-                        {/* Table Fee */}
+                        {/* Table */}
                         <View style={styles.payoutInputCol}>
-                          <Text style={styles.payoutInputLabel}>🎱 {t.tableShare || 'Table'}</Text>
+                          <Text style={styles.payoutInputLabel} numberOfLines={1}>
+                            🎱 {t.tableShort || 'Table'}
+                          </Text>
                           <View style={styles.payoutFieldWrap}>
                             <TextInput
                               style={styles.payoutInputField}
@@ -1805,16 +1814,18 @@ const renderStore = () => {
                         </View>
                       </View>
 
-                      {/* Live Allocation Balance Indicator */}
+                      {/* Live Allocation Balance Indicator (Shows Total Birr Instead of 100%) */}
                       <View style={styles.payoutBalanceRow}>
                         {isPayoutBalanced ? (
                           <View style={styles.balancedPill}>
-                            <Ionicons name="checkmark-circle" size={14} color="#00e676" style={{ marginRight: 4 }} />
-                            <Text style={styles.balancedText}>{t.payoutBalanced || '✓ 100% Allocated'}</Text>
+                            <Ionicons name="checkmark-circle" size={15} color="#00e676" style={{ marginRight: 6 }} />
+                            <Text style={styles.balancedText}>
+                              ✓ {t.payoutBalancedText || 'Balanced'} ({calcTotalPot} Birr)
+                            </Text>
                           </View>
                         ) : (
                           <View style={styles.unbalancedPill}>
-                            <Ionicons name="alert-circle" size={14} color={payoutRemainder > 0 ? '#ffb300' : '#ff4444'} style={{ marginRight: 4 }} />
+                            <Ionicons name="alert-circle" size={15} color={payoutRemainder > 0 ? '#ffb300' : '#ff4444'} style={{ marginRight: 6 }} />
                             <Text style={[styles.unbalancedText, { color: payoutRemainder > 0 ? '#ffb300' : '#ff4444' }]}>
                               {payoutRemainder > 0 
                                 ? `${payoutRemainder} ${t.remainingToAllocate || 'Birr remaining'}`
@@ -3307,33 +3318,41 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   payoutCardContainer: {
-    backgroundColor: 'rgba(16, 24, 40, 0.75)',
+    backgroundColor: 'rgba(16, 24, 40, 0.85)',
     borderRadius: 16,
     padding: 14,
     marginTop: 10,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 204, 0, 0.3)',
+    borderColor: 'rgba(255, 204, 0, 0.35)',
   },
   payoutCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  payoutTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
   },
   payoutCardTitle: {
     color: '#ffcc00',
     fontSize: 11,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
+    flexShrink: 1,
   },
   totalPotBadge: {
-    backgroundColor: 'rgba(255, 215, 0, 0.12)',
+    backgroundColor: 'rgba(255, 215, 0, 0.15)',
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#FFD700',
+    flexShrink: 0,
   },
   totalPotBadgeText: {
     color: '#cbd5e1',
@@ -3343,6 +3362,7 @@ const styles = StyleSheet.create({
   payoutInputsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   payoutInputCol: {
     flex: 1,
@@ -3353,30 +3373,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     marginBottom: 6,
+    textAlign: 'center',
+    height: 18,
+    lineHeight: 18,
   },
   payoutFieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: '#0a0d16',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 6,
+    height: 44,
   },
   payoutInputField: {
-    flex: 1,
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '900',
     textAlign: 'center',
     padding: 0,
+    minWidth: 32,
   },
   payoutCurr: {
     color: '#64748b',
     fontSize: 10,
     fontWeight: '700',
-    marginLeft: 2,
+    marginLeft: 3,
   },
   payoutBalanceRow: {
     flexDirection: 'row',
