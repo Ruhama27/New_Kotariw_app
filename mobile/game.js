@@ -59,7 +59,6 @@ export class GameEngine {
     }
 
     calculateScore(number, isTwoPlayer) {
-        if (isTwoPlayer && number === 3) return 6;
         return number;
     }
 
@@ -77,9 +76,27 @@ export class GameEngine {
         const points = this.calculateScore(number, isTwoPlayer);
         const prevPlayerIndex = this.current_player_index;
 
+        // Snapshot previous scores for precise undo
+        const prevScores = isTwoPlayer ? {
+            [this.player_list[0]]: this.players[this.player_list[0]].total_score,
+            [this.player_list[1]]: this.players[this.player_list[1]].total_score
+        } : {
+            [pid]: (this.players.find(p => p.id === pid) || {}).score
+        };
+
         if (isTwoPlayer) {
+            // In 2-player Kotariw, score is calculated as a single net balance between both players
+            const other = this.player_list[0] === pid ? this.player_list[1] : this.player_list[0];
+            const netBalance = this.players[pid].total_score - this.players[other].total_score;
             this.players[pid].history.push(`+${number}`);
-            this.players[pid].total_score += points;
+            const newBalance = netBalance + points;
+            if (newBalance >= 0) {
+                this.players[pid].total_score = newBalance;
+                this.players[other].total_score = 0;
+            } else {
+                this.players[pid].total_score = 0;
+                this.players[other].total_score = -newBalance;
+            }
         } else {
             const p = this.players.find(p => p.id === pid);
             p.history.push(`+${number}`);
@@ -91,7 +108,8 @@ export class GameEngine {
             type: 'add',
             player: pid,
             number,
-            previous_player_index: prevPlayerIndex
+            previous_player_index: prevPlayerIndex,
+            previous_scores: prevScores
         });
         // Scorer keeps their turn. Turn only passes when a player loses a point or manually passes turn.
     }
@@ -105,10 +123,27 @@ export class GameEngine {
         const points = this.calculateScore(number, isTwoPlayer);
         const prevPlayerIndex = this.current_player_index;
 
+        // Snapshot previous scores for precise undo
+        const prevScores = isTwoPlayer ? {
+            [this.player_list[0]]: this.players[this.player_list[0]].total_score,
+            [this.player_list[1]]: this.players[this.player_list[1]].total_score
+        } : {
+            [pid]: (this.players.find(p => p.id === pid) || {}).score
+        };
+
         if (isTwoPlayer) {
-            const other = pid === this.player_list[1] ? this.player_list[0] : this.player_list[1];
+            // In 2-player Kotariw, penalties decrease own score first, and any remainder goes to the opponent
+            const other = this.player_list[0] === pid ? this.player_list[1] : this.player_list[0];
+            const netBalance = this.players[pid].total_score - this.players[other].total_score;
             this.players[pid].history.push(`-${number}`);
-            this.players[other].total_score += points; 
+            const newBalance = netBalance - points;
+            if (newBalance >= 0) {
+                this.players[pid].total_score = newBalance;
+                this.players[other].total_score = 0;
+            } else {
+                this.players[pid].total_score = 0;
+                this.players[other].total_score = -newBalance;
+            }
         } else {
             const p = this.players.find(p => p.id === pid);
             p.history.push(`-${number}`);
@@ -121,7 +156,8 @@ export class GameEngine {
             type: 'subtract',
             player: pid,
             number,
-            previous_player_index: prevPlayerIndex
+            previous_player_index: prevPlayerIndex,
+            previous_scores: prevScores
         });
         
         this.nextTurn();
@@ -131,7 +167,7 @@ export class GameEngine {
         if (this.action_history.length === 0) return false;
         
         const lastAction = this.action_history.pop();
-        const { type, player, number, previous_player_index } = lastAction;
+        const { type, player, number, previous_player_index, previous_scores } = lastAction;
         
         // Only remove number from used_numbers if it was pocketed during an 'add'
         if (type === 'add') {
@@ -142,26 +178,22 @@ export class GameEngine {
         this.current_player_index = previous_player_index;
         
         const isTwoPlayer = (this.player_count === 2);
-        const points = this.calculateScore(number, isTwoPlayer);
         
-        if (type === 'add') {
-            if (isTwoPlayer) {
-                this.players[player].history.pop();
-                this.players[player].total_score -= points;
-            } else {
-                const p = this.players.find(p => p.id === player);
-                p.history.pop();
-                p.score -= points;
+        if (isTwoPlayer) {
+            this.players[player].history.pop();
+            if (previous_scores) {
+                this.players[this.player_list[0]].total_score = previous_scores[this.player_list[0]];
+                this.players[this.player_list[1]].total_score = previous_scores[this.player_list[1]];
             }
-        } else if (type === 'subtract') {
-            if (isTwoPlayer) {
-                const other = player === this.player_list[1] ? this.player_list[0] : this.player_list[1];
-                this.players[player].history.pop();
-                this.players[other].total_score -= points;
+        } else {
+            const p = this.players.find(p => p.id === player);
+            p.history.pop();
+            if (previous_scores && previous_scores[player] !== undefined) {
+                p.score = previous_scores[player];
             } else {
-                const p = this.players.find(p => p.id === player);
-                p.history.pop();
-                p.score += points;
+                const points = this.calculateScore(number, isTwoPlayer);
+                if (type === 'add') p.score -= points;
+                else if (type === 'subtract') p.score += points;
             }
         }
         

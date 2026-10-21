@@ -41,8 +41,6 @@ class Game:
 
     def calculate_score(self, number: int, is_two_player: bool = False) -> int:
         """Calculate score based on game rules"""
-        if is_two_player and number == 3:
-            return 6
         return number
 
     def add_score(self, player_id: str, number: int):
@@ -61,8 +59,16 @@ class Game:
         points = self.calculate_score(number, is_two_player)
 
         if self.player_count == 2:
+            other = "P1" if pid == "P2" else "P2"
+            net_balance = self.players[pid]["total_score"] - self.players[other]["total_score"]
             self.players[pid]["history"].append(f"+{number}")
-            self.players[pid]["total_score"] += points
+            new_balance = net_balance + points
+            if new_balance >= 0:
+                self.players[pid]["total_score"] = new_balance
+                self.players[other]["total_score"] = 0
+            else:
+                self.players[pid]["total_score"] = 0
+                self.players[other]["total_score"] = -new_balance
         else:
             player = next(p for p in self.players if p["id"] == pid)
             player["history"].append(f"+{number}")
@@ -71,8 +77,8 @@ class Game:
         self.used_numbers.append(number)
         
         if self.player_count > 2:
-            # End turn immediately for 3-4 players
-            self.next_turn()
+            # In 3-4 players, player retains turn on add, turn passes only on loss/manual
+            pass
         else:
             # Player continues playing after an add
             pass
@@ -91,19 +97,22 @@ class Game:
         points = self.calculate_score(number, is_two_player)
 
         if self.player_count == 2:
-            # For 2 players, subtract affects the other player
             other = "P1" if pid == "P2" else "P2"
-            self.players[other]["history"].append(f"-{number}")
-            self.players[other]["total_score"] += points
+            net_balance = self.players[pid]["total_score"] - self.players[other]["total_score"]
+            self.players[pid]["history"].append(f"-{number}")
+            new_balance = net_balance - points
+            if new_balance >= 0:
+                self.players[pid]["total_score"] = new_balance
+                self.players[other]["total_score"] = 0
+            else:
+                self.players[pid]["total_score"] = 0
+                self.players[other]["total_score"] = -new_balance
         else:
-            # For 3-4 players, subtract affects the current player
             player = next(p for p in self.players if p["id"] == pid)
             player["history"].append(f"-{number}")
             player["score"] -= points
 
         # Ball remains on table when penalized, only scores change
-        # self.used_numbers.append(number)
-        
         # Player's turn ends after a subtract
         self.next_turn()
 
