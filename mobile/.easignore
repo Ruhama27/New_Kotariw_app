@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+dist/
+web-build/
+android/build/
+android/.gradle/
+android/app/build/
+build_error.txt
+build_error_ascii.txt
