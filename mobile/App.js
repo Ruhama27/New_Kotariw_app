@@ -7,7 +7,7 @@ import { GameEngine } from './game';
 import { translations } from './i18n';
 import { loadSounds, unloadSounds, playSound, setSoundEnabled, playBackgroundMusic, stopBackgroundMusic } from './sounds';
 import * as WebBrowser from 'expo-web-browser';
-import { initializeChapaPayment, verifyChapaPayment, getChapaSecretKey, getChapaPublicKey, saveChapaKeys, getTelebirrConfig, saveTelebirrConfig, getTelebirrQRUrl, recordPurchase } from './payment';
+import { initializeChapaPayment, verifyChapaPayment, getChapaSecretKey, getChapaPublicKey, saveChapaKeys, getTelebirrConfig, saveTelebirrConfig, getTelebirrQRUrl, recordPurchase, getPurchases, updatePurchaseStatus } from './payment';
 
 const getTodayDateString = () => {
   const d = new Date();
@@ -123,11 +123,11 @@ export default function App() {
   const [pubKeyInput, setPubKeyInput] = useState('');
   const [secKeyInput, setSecKeyInput] = useState('');
 
-  // Telebirr & Venue Operator Payment Config
+  // Telebirr & Venue Operator Payment Config (Default: 0968554778)
   const [telebirrConfig, setTelebirrConfig] = useState({
-    merchant: '991122',
-    phone: '0911223344',
-    name: 'Kotariw Game Co.',
+    merchant: '0968554778',
+    phone: '0968554778',
+    name: 'Kotariw Game',
     cbe: '1000123456789'
   });
   const [tbMerchantInput, setTbMerchantInput] = useState('');
@@ -135,6 +135,18 @@ export default function App() {
   const [tbNameInput, setTbNameInput] = useState('');
   const [cbeAccountInput, setCbeAccountInput] = useState('');
   const [telebirrTxnInput, setTelebirrTxnInput] = useState('');
+  const [transferAmountInput, setTransferAmountInput] = useState('5');
+  const [purchasesList, setPurchasesList] = useState([]);
+  const pendingPurchases = purchasesList.filter(p => p.status === 'PENDING');
+
+  const refreshPurchasesList = async () => {
+    try {
+      const list = await getPurchases();
+      setPurchasesList(list);
+    } catch (e) {
+      console.error('Failed to load purchases:', e);
+    }
+  };
 
   useEffect(() => {
     if (storeVisible) {
@@ -416,27 +428,80 @@ export default function App() {
   };
 
   const handleConfirmTelebirr = async () => {
+    const expectedPrice = selectedPackage ? selectedPackage.price : 5;
+    const enteredAmount = Number(transferAmountInput);
+
+    // 1. STRICT AMOUNT VERIFICATION: Must equal package price (e.g., 5 Birr for 1 coin)
+    if (isNaN(enteredAmount) || enteredAmount !== expectedPrice) {
+      playSound('penalty');
+      triggerHaptic('heavy');
+      Alert.alert(
+        t.amountMismatch || 'Amount Mismatch',
+        (t.amountMismatchDesc && typeof t.amountMismatchDesc === 'function')
+          ? t.amountMismatchDesc(expectedPrice, isNaN(enteredAmount) ? 0 : enteredAmount)
+          : `The coin cannot be sold! 1 Coin costs ${expectedPrice} Birr, but you entered ${isNaN(enteredAmount) ? 0 : enteredAmount} Birr. If the transferred amount is not equal to the price, coins cannot be sold!`
+      );
+      return;
+    }
+
+    // 2. Transaction ID or Sender Phone check
     if (!telebirrTxnInput || telebirrTxnInput.trim().length < 4) {
       Alert.alert(t.error, t.telebirrTxnTooShort);
       return;
     }
+
+    // 3. Mark transaction as PENDING verification by venue operator
     const addedCoins = selectedPackage ? selectedPackage.amount : 1;
-    const newVal = (coins || 0) + addedCoins;
-    await AsyncStorage.setItem('kotariw_coins', newVal.toString());
-    setCoins(newVal);
     await recordPurchase({
       method: 'telebirr',
+      status: 'PENDING',
       coins: addedCoins,
-      amount: selectedPackage ? selectedPackage.price : 0,
+      amount: enteredAmount,
       txnRef: telebirrTxnInput.trim(),
-      receiver: telebirrConfig.merchant || telebirrConfig.phone,
-      operator,
-      table: tableNumber,
+      receiver: '0968554778',
+      operator: (operator || 'Operator'),
+      table: tableNumber || '1',
     });
-    playSound('payment_success');
-    triggerHaptic('success');
-    Alert.alert(t.telebirrSuccessTitle, t.telebirrSuccessMsg(addedCoins));
+
+    await refreshPurchasesList();
+    playSound('click');
+    triggerHaptic('medium');
+
+    Alert.alert(
+      t.paymentSubmittedPending || 'Payment Submitted (Pending Verification)',
+      (t.paymentPendingDesc && typeof t.paymentPendingDesc === 'function')
+        ? t.paymentPendingDesc(enteredAmount)
+        : `Your transfer of ${enteredAmount} Birr to 0968554778 with Txn Ref "${telebirrTxnInput.trim()}" has been submitted.\n\nThe venue operator will verify receipt on 0968554778 before coins are credited to your balance.`
+    );
+
+    setTelebirrTxnInput('');
+    setTransferAmountInput('5');
     setStoreVisible(false);
+  };
+
+  const handleApprovePurchase = async (p) => {
+    triggerHaptic('success');
+    const newVal = (coins || 0) + p.coins;
+    await AsyncStorage.setItem('kotariw_coins', newVal.toString());
+    setCoins(newVal);
+    await updatePurchaseStatus(p.id, 'APPROVED');
+    await refreshPurchasesList();
+    playSound('payment_success');
+    Alert.alert(
+      t.paymentApproved || 'Payment Approved!',
+      `Verified ${p.amount} Birr transfer on 0968554778. Added ${p.coins} coin(s) to game balance!`
+    );
+  };
+
+  const handleRejectPurchase = async (p) => {
+    triggerHaptic('medium');
+    await updatePurchaseStatus(p.id, 'REJECTED');
+    await refreshPurchasesList();
+    playSound('penalty');
+    Alert.alert(
+      t.paymentRejected || 'Payment Rejected',
+      `Payment request of ${p.amount} Birr (Txn: ${p.txnRef}) was rejected. Coins were not added.`
+    );
   };
 
   const handleOpenTelebirrApp = async () => {
@@ -454,7 +519,8 @@ export default function App() {
   };
 
   const handleDialTelebirrUssd = () => {
-    Linking.openURL('tel:*127%23');
+    const amount = selectedPackage ? selectedPackage.price : 5;
+    Linking.openURL('tel:*127*1*0968554778*' + amount + '%23');
   };
 
   const handleConfirmManualTransfer = () => {
@@ -887,6 +953,82 @@ export default function App() {
                   )}
                 </LinearGradient>
 
+                {/* ── Payment Verification Queue (Telebirr 0968554778) ── */}
+                <View style={{ marginBottom: 18, backgroundColor: '#131b2e', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: pendingPurchases.length > 0 ? '#ff9800' : '#334155' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="card" size={20} color="#00e676" style={{ marginRight: 8 }} />
+                      <Text style={{ color: '#fff', fontSize: 15, fontWeight: 'bold' }}>
+                        {t.verifyPaymentsTitle || 'Payment Requests'}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: pendingPurchases.length > 0 ? '#ff9800' : '#334155', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                      <Text style={{ color: pendingPurchases.length > 0 ? '#111' : '#cbd5e1', fontSize: 11, fontWeight: 'bold' }}>
+                        {pendingPurchases.length} {t.statusPending || 'PENDING'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {pendingPurchases.length === 0 ? (
+                    <Text style={{ color: '#64748b', fontSize: 12, textAlign: 'center', paddingVertical: 8 }}>
+                      {t.noPendingPayments || 'No pending payments to verify.'}
+                    </Text>
+                  ) : (
+                    pendingPurchases.map(p => (
+                      <View
+                        key={p.id}
+                        style={{
+                          backgroundColor: '#0b1120',
+                          borderRadius: 10,
+                          padding: 12,
+                          marginBottom: 10,
+                          borderWidth: 1,
+                          borderColor: '#ff9800',
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <Text style={{ color: '#00e676', fontWeight: 'bold', fontSize: 14 }}>
+                            🪙 {p.coins} {p.coins === 1 ? 'Coin' : 'Coins'}
+                          </Text>
+                          <Text style={{ color: '#ffcc00', fontWeight: 'bold', fontSize: 14 }}>
+                            {p.amount} Birr
+                          </Text>
+                        </View>
+                        <Text style={{ color: '#cbd5e1', fontSize: 12, marginBottom: 2 }}>
+                          📱 To: <Text style={{ color: '#fff', fontWeight: 'bold' }}>0968554778</Text>
+                        </Text>
+                        <Text style={{ color: '#cbd5e1', fontSize: 12, marginBottom: 2 }}>
+                          🔢 Txn: <Text style={{ color: '#00cfff', fontWeight: 'bold' }}>{p.txnRef}</Text>
+                        </Text>
+                        <Text style={{ color: '#64748b', fontSize: 10, marginBottom: 10 }}>
+                          ⏱ {new Date(p.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+
+                        {/* Action Buttons: Approve / Reject */}
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                          <TouchableOpacity
+                            onPress={() => handleApprovePurchase(p)}
+                            style={{ flex: 1, backgroundColor: '#00e676', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}
+                          >
+                            <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 12 }}>
+                              {t.approvePayment || '✓ Approve'}
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => handleRejectPurchase(p)}
+                            style={{ flex: 1, backgroundColor: '#ff4444', borderRadius: 8, paddingVertical: 8, alignItems: 'center' }}
+                          >
+                            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>
+                              {t.rejectPayment || '✕ Reject'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ))
+                  )}
+                </View>
+
                 {/* Operator List */}
                 <Text style={{ color: '#aab', fontSize: 13, fontWeight: 'bold', marginBottom: 10 }}>{t.selectOperator}</Text>
                 {operatorProfiles.length === 0 ? (
@@ -1030,6 +1172,26 @@ export default function App() {
                 <Text style={styles.menuOptionText}>{t.operatorProfiles}</Text>
               </TouchableOpacity>
 
+              <TouchableOpacity 
+                style={styles.menuOptionRow} 
+                onPress={() => {
+                  triggerHaptic('light');
+                  setMenuVisible(false);
+                  refreshPurchasesList();
+                  setOperatorModalVisible(true);
+                }}
+              >
+                <Ionicons name="wallet" size={24} color="#00e676" />
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.menuOptionText}>{t.verifyPaymentsMenu || 'Verify Payments'}</Text>
+                  {pendingPurchases.length > 0 && (
+                    <View style={{ backgroundColor: '#ff9800', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, marginRight: 8 }}>
+                      <Text style={{ color: '#111', fontSize: 11, fontWeight: 'bold' }}>{pendingPurchases.length}</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+
 
             </LinearGradient>
           </View>
@@ -1091,6 +1253,7 @@ const renderStore = () => {
                     onPress={() => {
                       triggerHaptic('light');
                       setSelectedPackage({ amount: 1, price: 5 });
+                      setTransferAmountInput('5');
                       setPaymentStep('method');
                     }}
                     style={styles.packageCard}
@@ -1112,6 +1275,7 @@ const renderStore = () => {
                     onPress={() => {
                       triggerHaptic('light');
                       setSelectedPackage({ amount: 10, price: 50 });
+                      setTransferAmountInput('50');
                       setPaymentStep('method');
                     }}
                     style={[styles.packageCard, styles.packageCardPopular]}
@@ -1136,6 +1300,7 @@ const renderStore = () => {
                     onPress={() => {
                       triggerHaptic('light');
                       setSelectedPackage({ amount: 50, price: 250 });
+                      setTransferAmountInput('250');
                       setPaymentStep('method');
                     }}
                     style={styles.packageCard}
@@ -1216,7 +1381,7 @@ const renderStore = () => {
                       {selectedPackage.price} ETB
                     </Text>
                     <Text style={styles.tbCoinSub}>
-                      ({selectedPackage.amount} {selectedPackage.amount === 1 ? 'Coin' : 'Coins'})
+                      ({selectedPackage.amount} {selectedPackage.amount === 1 ? 'Coin' : 'Coins'} • 5 Birr / Coin)
                     </Text>
                   </LinearGradient>
 
@@ -1228,7 +1393,7 @@ const renderStore = () => {
                   <View style={styles.tbQrWrapper}>
                     <View style={styles.tbQrCard}>
                       <Image 
-                        source={{ uri: getTelebirrQRUrl(selectedPackage.price, telebirrConfig.merchant, telebirrConfig.name) }} 
+                        source={{ uri: getTelebirrQRUrl(selectedPackage.price, '0968554778', 'Kotariw Game') }} 
                         style={styles.tbQrImage}
                         resizeMode="contain"
                       />
@@ -1239,21 +1404,23 @@ const renderStore = () => {
                     </View>
                   </View>
 
-                  {/* Telebirr Venue Merchant Details */}
+                  {/* Telebirr Verified Receiver Details */}
                   <View style={styles.tbDetailsBox}>
                     <View style={styles.tbDetailRow}>
-                      <Text style={styles.tbDetailLabel}>{t.merchantCode}:</Text>
-                      <Text style={styles.tbDetailValHighlight}>{telebirrConfig.merchant}</Text>
+                      <Text style={styles.tbDetailLabel}>{t.phoneNum}:</Text>
+                      <Text style={[styles.tbDetailValHighlight, { fontSize: 17, color: '#00e676' }]} selectable={true}>
+                        0968554778
+                      </Text>
                     </View>
                     <View style={styles.tbDetailDivider} />
                     <View style={styles.tbDetailRow}>
-                      <Text style={styles.tbDetailLabel}>{t.phoneNum}:</Text>
-                      <Text style={styles.tbDetailVal}>{telebirrConfig.phone}</Text>
+                      <Text style={styles.tbDetailLabel}>{t.amountDue}:</Text>
+                      <Text style={[styles.tbDetailValHighlight, { color: '#ffcc00' }]}>{selectedPackage.price} Birr</Text>
                     </View>
                     <View style={styles.tbDetailDivider} />
                     <View style={styles.tbDetailRow}>
                       <Text style={styles.tbDetailLabel}>{t.receiverName}:</Text>
-                      <Text style={styles.tbDetailVal}>{telebirrConfig.name}</Text>
+                      <Text style={styles.tbDetailVal}>Kotariw Game (0968554778)</Text>
                     </View>
                   </View>
 
@@ -1274,9 +1441,26 @@ const renderStore = () => {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Confirmation Section */}
+                  {/* Confirmation Section with Required Amount Check */}
                   <View style={styles.tbConfirmBox}>
-                    <Text style={styles.tbConfirmLabel}>{t.telebirrTxnPrompt}</Text>
+                    {/* Amount Transferred Input */}
+                    <Text style={styles.tbConfirmLabel}>
+                      {t.transferredAmountLabel || 'Amount Transferred (Birr)'} *
+                    </Text>
+                    <TextInput
+                      style={styles.tbConfirmInput}
+                      value={transferAmountInput}
+                      onChangeText={setTransferAmountInput}
+                      placeholder={String(selectedPackage.price)}
+                      placeholderTextColor="#667"
+                      keyboardType="numeric"
+                    />
+                    <Text style={{ color: '#94a3b8', fontSize: 11, marginTop: 4, marginBottom: 12 }}>
+                      ⓘ Rate: 1 Coin = 5 Birr. Expected: <Text style={{ color: '#00e676', fontWeight: 'bold' }}>{selectedPackage.price} Birr</Text>
+                    </Text>
+
+                    {/* Transaction ID or Sender Phone */}
+                    <Text style={styles.tbConfirmLabel}>{t.telebirrTxnPrompt} *</Text>
                     <TextInput
                       style={styles.tbConfirmInput}
                       value={telebirrTxnInput}
@@ -1286,10 +1470,12 @@ const renderStore = () => {
                       autoCapitalize="characters"
                     />
 
-                    <TouchableOpacity onPress={handleConfirmTelebirr} style={{ marginTop: 12 }}>
+                    <TouchableOpacity onPress={handleConfirmTelebirr} style={{ marginTop: 14 }}>
                       <LinearGradient colors={['#00e676', '#00a855']} style={styles.storeBtnInner}>
-                        <Ionicons name="checkmark-done-circle" size={24} color="#111" />
-                        <Text style={[styles.storeBtnText, { color: '#111', fontWeight: 'bold' }]}>{t.confirmTelebirrPayment}</Text>
+                        <Ionicons name="paper-plane" size={22} color="#111" />
+                        <Text style={[styles.storeBtnText, { color: '#111', fontWeight: 'bold' }]}>
+                          {t.confirmTelebirrPayment}
+                        </Text>
                       </LinearGradient>
                     </TouchableOpacity>
                   </View>

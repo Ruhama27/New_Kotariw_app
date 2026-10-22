@@ -4,10 +4,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const DEFAULT_PUBLIC_KEY = 'CHAPUBK_TEST-c3u0WvP98fB325v5S7N2o1H3J4K5L6M7';
 const DEFAULT_SECRET_KEY = 'CHASECK_TEST-1H2J3K4L5M6N7O8P9Q0R1S2T3U4V5W6X';
 
-// Default Telebirr & Banking Config for Ethiopian Pool Venues
-export const DEFAULT_TELEBIRR_MERCHANT = '991122';
-export const DEFAULT_TELEBIRR_PHONE = '0911223344';
-export const DEFAULT_TELEBIRR_NAME = 'Kotariw Game Co.';
+// Verified Telebirr & Banking Config for Kotariw Pool Venue
+export const DEFAULT_TELEBIRR_MERCHANT = '0968554778';
+export const DEFAULT_TELEBIRR_PHONE = '0968554778';
+export const DEFAULT_TELEBIRR_NAME = 'Kotariw Game';
 export const DEFAULT_CBE_ACCOUNT = '1000123456789';
 
 /**
@@ -99,8 +99,8 @@ export async function saveTelebirrConfig({ merchant, phone, name, cbe }) {
  * @param {string} receiverCode - Merchant code or Phone number
  * @param {string} receiverName - Business name
  */
-export function getTelebirrQRUrl(amount, receiverCode = DEFAULT_TELEBIRR_MERCHANT, receiverName = DEFAULT_TELEBIRR_NAME) {
-  const safeReceiver = encodeURIComponent(receiverCode || DEFAULT_TELEBIRR_MERCHANT);
+export function getTelebirrQRUrl(amount, receiverCode = DEFAULT_TELEBIRR_PHONE, receiverName = DEFAULT_TELEBIRR_NAME) {
+  const safeReceiver = encodeURIComponent(receiverCode || DEFAULT_TELEBIRR_PHONE);
   const safeName = encodeURIComponent(receiverName || DEFAULT_TELEBIRR_NAME);
   const safeAmount = encodeURIComponent(amount || 0);
   const payload = 'telebirr://pay?receiver=' + safeReceiver + '&amount=' + safeAmount + '&name=' + safeName + '&currency=ETB&app=Kotariw';
@@ -114,16 +114,52 @@ export async function recordPurchase(purchase) {
   try {
     const existing = await AsyncStorage.getItem('kotariw_purchases');
     const list = existing ? JSON.parse(existing) : [];
-    list.unshift({
-      id: 'tx-' + Date.now(),
+    const item = {
+      id: purchase.id || 'tx-' + Date.now(),
       date: new Date().toISOString(),
+      status: purchase.status || 'PENDING', // PENDING, APPROVED, REJECTED
       ...purchase,
-    });
+    };
+    list.unshift(item);
     const trimmed = list.slice(0, 50);
     await AsyncStorage.setItem('kotariw_purchases', JSON.stringify(trimmed));
-    return true;
+    return item;
   } catch (e) {
     console.error('Failed to record purchase:', e);
+    return false;
+  }
+}
+
+/**
+ * Get all recorded purchases
+ */
+export async function getPurchases() {
+  try {
+    const existing = await AsyncStorage.getItem('kotariw_purchases');
+    return existing ? JSON.parse(existing) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Update a purchase status (e.g., APPROVED or REJECTED)
+ */
+export async function updatePurchaseStatus(txId, newStatus) {
+  try {
+    const existing = await AsyncStorage.getItem('kotariw_purchases');
+    if (!existing) return false;
+    const list = JSON.parse(existing);
+    const item = list.find(p => p.id === txId);
+    if (item) {
+      item.status = newStatus;
+      item.updatedAt = new Date().toISOString();
+      await AsyncStorage.setItem('kotariw_purchases', JSON.stringify(list));
+      return item;
+    }
+    return false;
+  } catch (e) {
+    console.error('Failed to update purchase status:', e);
     return false;
   }
 }
